@@ -7,3 +7,13 @@ overrides a rule. They are binding, not advisory.**
 @ENGINEERING-GUIDELINES.md
 
 The Iron Rule (concise reporting, grammar sacrificed for concision) applies to every reply.
+
+## Agent skills
+
+### Issue tracker
+
+Local markdown in `.scratch/`. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context. See `docs/agents/domain.md`.
