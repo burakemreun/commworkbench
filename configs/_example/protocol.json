@@ -1,0 +1,32 @@
+{
+  "protocol": {
+    "name": "SensorComm",
+    "version": "1.0",
+    "endianness": "little"
+  },
+  "checksum": {
+    "enabled": true,
+    "algorithm": "crc16",
+    "crc_variant": "modbus",
+    "covers": "payload"
+  },
+  "enums": {
+    "SensorMode": {
+      "values": [
+        {"name": "IDLE", "value": 0},
+        {"name": "ACTIVE", "value": 1}
+      ]
+    }
+  },
+  "messages": {
+    "SensorData": {
+      "id": 1,
+      "name": "Sensor Data",
+      "fields": [
+        {"name": "device_id", "type": "uint16"},
+        {"name": "temperature", "type": "float32"},
+        {"name": "humidity", "type": "uint8"}
+      ]
+    }
+  }
+}

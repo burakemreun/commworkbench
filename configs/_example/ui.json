@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "geometry": {"width": 1200, "height": 800},
+  "log_view": "mixed",
+  "panes": {"main_display": 0.5, "send_area": 0.5}
+}

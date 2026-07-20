@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "commworkbench"
+version = "0.1.0"
+description = "Binary protocol communication tool with tkinter GUI"
+requires-python = ">=3.10"
+dependencies = [
+    "pyserial>=3.5",
+    "crc>=3.0",
+]
+
+[project.optional-dependencies]
+dev = ["pyinstaller>=6.0"]
