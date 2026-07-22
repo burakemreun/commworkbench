@@ -41,7 +41,6 @@ class CommWorkbenchUI:
 
         self._log_entries: list[dict] = []
         self._field_labels: dict[str, dict[str, tk.Label]] = {}
-        self._unknown_labels: dict[str, tk.Label] = {}
 
         self._send_entries: dict[str, dict[str, tk.Entry]] = {}
         self._send_errors: dict[str, tk.Label] = {}
@@ -123,6 +122,8 @@ class CommWorkbenchUI:
 
         messages = self._protocol_config.get("messages", {})
         for msg_name, msg_def in messages.items():
+            if msg_def.get("direction", "rx") != "rx":
+                continue
             frame = ttk.Frame(self._notebook)
             self._notebook.add(frame, text=msg_def.get("name", msg_name))
             self._field_labels[msg_name] = {}
@@ -133,16 +134,6 @@ class CommWorkbenchUI:
                 lbl_val = tk.Label(frame, text="\u2014", anchor="w", padx=6, relief="sunken", width=30)
                 lbl_val.grid(row=i, column=1, sticky="w", padx=4, pady=2)
                 self._field_labels[msg_name][fname] = lbl_val
-
-        self._unknown_frame = ttk.Frame(self._notebook)
-        self._notebook.add(self._unknown_frame, text="Unknown")
-        self._unknown_labels = {}
-        for i, key in enumerate(["ID", "Raw Hex"]):
-            lbl_name = tk.Label(self._unknown_frame, text=f"{key}:", anchor="e", padx=6)
-            lbl_name.grid(row=i, column=0, sticky="e", padx=4, pady=2)
-            lbl_val = tk.Label(self._unknown_frame, text="\u2014", anchor="w", padx=6, relief="sunken", width=40)
-            lbl_val.grid(row=i, column=1, sticky="w", padx=4, pady=2)
-            self._unknown_labels[key] = lbl_val
 
     def _build_traffic_log(self):
         container = ttk.Frame(self._paned)
@@ -222,9 +213,6 @@ class CommWorkbenchUI:
             for fname, val in fields.items():
                 if fname in self._field_labels[msg_name]:
                     self._field_labels[msg_name][fname].config(text=str(val))
-        else:
-            self._unknown_labels["ID"].config(text=f"0x{frame.get('msg_id', 0):02X}")
-            self._unknown_labels["Raw Hex"].config(text=frame.get("raw_hex", ""))
 
     def _add_log_entry(self, frame: dict):
         now = datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -267,6 +255,8 @@ class CommWorkbenchUI:
 
         messages = self._protocol_config.get("messages", {})
         for msg_name, msg_def in messages.items():
+            if msg_def.get("direction", "tx") != "tx":
+                continue
             self._build_message_form(msg_name, msg_def)
 
     def _bind_mousewheel(self, canvas):
@@ -420,7 +410,6 @@ class CommWorkbenchUI:
         if hasattr(self, "_paned"):
             self._paned.destroy()
         self._field_labels.clear()
-        self._unknown_labels.clear()
         self._build_panes()
 
     def rebuild_send_area(self):
@@ -456,8 +445,6 @@ class CommWorkbenchUI:
         for msg_labels in self._field_labels.values():
             for lbl in msg_labels.values():
                 lbl.config(text="\u2014")
-        for lbl in self._unknown_labels.values():
-            lbl.config(text="\u2014")
 
     def _on_configure(self, _event=None):
         try:

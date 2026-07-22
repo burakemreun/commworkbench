@@ -48,7 +48,8 @@ class Parser:
 
         self._id_to_msg: dict[int, tuple[str, dict]] = {}
         for name, msg_def in protocol_config.get("messages", {}).items():
-            self._id_to_msg[msg_def["id"]] = (name, msg_def)
+            if msg_def.get("direction", "rx") == "rx":
+                self._id_to_msg[msg_def["id"]] = (name, msg_def)
 
     def feed(self, data: bytes):
         now = time.time()

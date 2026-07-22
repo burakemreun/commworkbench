@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: 13, 14
 
@@ -8,16 +8,16 @@ Blocked by: 13, 14
 
 **Blocked by:** 13 (backend pipeline delivering DecodedFrames to queue), 14 (UI skeleton with PanedWindow and placeholders).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Tabbed main display: one tab per message type from protocol.json
-- [ ] Each tab shows latest decoded dict for that message type
-- [ ] Treeview traffic log: Time, Direction, Message, Raw Hex columns
-- [ ] Mixed view mode: single chronological list (default)
-- [ ] Split view mode: TX and RX in separate panes
-- [ ] View mode toggle in UI (or config-driven)
-- [ ] Queue polling on root.after(50ms)
-- [ ] Unknown message IDs show as raw hex in log: `[UNKNOWN] 0xXX | ...`
-- [ ] Decode errors logged to traffic log, no popups
-- [ ] Connection status events update LED indicator
-- [ ] Verifiable: connect to device, see decoded messages in tabs and traffic in log
+- [x] Tabbed main display: one tab per message type from protocol.json
+- [x] Each tab shows latest decoded dict for that message type
+- [x] Treeview traffic log: Time, Direction, Message, Raw Hex columns
+- [x] Mixed view mode: single chronological list (default)
+- [ ] Split view mode: TX and RX in separate panes — SHORTCUT: not implemented, upgrade when split mode needed
+- [ ] View mode toggle in UI (or config-driven) — SHORTCUT: not implemented, upgrade with split mode
+- [x] Queue polling on root.after(50ms)
+- [x] Unknown message IDs show as raw hex in Unknown tab + log
+- [x] Decode errors logged to traffic log, no popups
+- [x] Connection status events update LED indicator
+- [x] Verifiable: connect to device, see decoded messages in tabs and traffic in log

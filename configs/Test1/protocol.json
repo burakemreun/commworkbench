@@ -19,14 +19,24 @@
     }
   },
   "messages": {
-    "SensorData": {
+    "QuerySensor": {
       "id": 1,
-      "name": "Sensor Data",
+      "name": "Query Sensor",
+      "direction": "tx",
+      "fields": [
+        {"name": "device_id", "type": "uint16"}
+      ]
+    },
+    "SensorResponse": {
+      "id": 2,
+      "name": "Sensor Response",
       "direction": "rx",
       "fields": [
         {"name": "device_id", "type": "uint16"},
         {"name": "temperature", "type": "float32"},
-        {"name": "humidity", "type": "uint8"}
+        {"name": "humidity", "type": "uint8"},
+        {"name": "mode", "type": "enum", "enum_ref": "SensorMode"},
+        {"name": "battery_level", "type": "uint8"}
       ]
     }
   }
