@@ -38,6 +38,7 @@ class CommWorkbenchUI:
         self._close_callback = close_callback
         self._traffic_logger = traffic_logger
 
+        self._poll_after_id = None
         self._log_entries: list[dict] = []
         self._field_labels: dict[str, dict[str, tk.Label]] = {}
 
@@ -57,8 +58,6 @@ class CommWorkbenchUI:
         self._build_status_bar()
         self._build_send_area()
         self._build_panes()
-
-        self.root.bind("<Configure>", self._on_configure)
 
         if self._queue is not None:
             self._poll_queue()
@@ -109,11 +108,33 @@ class CommWorkbenchUI:
         self._build_main_display()
         self._build_traffic_log()
 
-        self.root.update_idletasks()
+        # panes are stored as a ratio: re-apply it on every resize, and re-read it
+        # whenever the user lets go of the sash
+        self._sash_pending = False
+        self._paned.bind("<Configure>", self._schedule_sash_ratio)
+        self._paned.bind("<ButtonRelease-1>", self._record_sash_ratio)
+
+    def _schedule_sash_ratio(self, _event=None):
+        # placing the sash inside the <Configure> handler loses to the paned
+        # window's own relayout, so wait for it to finish first
+        if self._sash_pending:
+            return
+        self._sash_pending = True
+        self.root.after_idle(self._apply_sash_ratio)
+
+    def _apply_sash_ratio(self):
+        self._sash_pending = False
         pw = self._paned.winfo_width()
         if pw > 1:
-            pos = int(pw * self._ratios.get("main_display", 0.5))
-            self._paned.sashpos(0, pos)
+            self._paned.sash_place(0, int(pw * self._ratios.get("main_display", 0.5)), 0)
+
+    def _record_sash_ratio(self, _event=None):
+        try:
+            pw = self._paned.winfo_width()
+            if pw > 1:
+                self._ratios["main_display"] = self._paned.sash_coord(0)[0] / pw
+        except (tk.TclError, IndexError):
+            pass
 
     def _build_main_display(self):
         self._notebook = ttk.Notebook(self._paned)
@@ -164,7 +185,7 @@ class CommWorkbenchUI:
                 self._handle_event(event)
         except queue.Empty:
             pass
-        self.root.after(UI_POLL_INTERVAL_MS, self._poll_queue)
+        self._poll_after_id = self.root.after(UI_POLL_INTERVAL_MS, self._poll_queue)
 
     def _handle_event(self, event: dict):
         etype = event.get("type")
@@ -350,14 +371,7 @@ class CommWorkbenchUI:
             return
 
         raw_hex = encoded.hex(" ")
-        self._add_log_entry({
-            "type": "frame",
-            "msg_name": msg_name,
-            "fields": values,
-            "raw_hex": raw_hex,
-            "direction": "tx",
-        })
-
+        # tree row + comm.log block both come from the queue round-trip below
         if self._queue is not None:
             self._queue.put({
                 "type": "frame",
@@ -404,6 +418,16 @@ class CommWorkbenchUI:
                 info["after_id"] = None
                 info["btn"].config(text="Start")
 
+    def apply_ui_config(self, ui_cfg: dict):
+        """Adopt another project's ui.json: layout is per-project, so the window
+        follows it instead of writing the previous project's layout into it."""
+        self.ui_cfg = ui_cfg
+        self._ratios = dict(ui_cfg.get("panes", {"main_display": 0.5}))
+        self._max_log_entries = ui_cfg.get("max_log_entries", 1000)
+        geo = ui_cfg.get("geometry", {})
+        if "width" in geo and "height" in geo:
+            self.root.geometry(f"{geo['width']}x{geo['height']}")
+
     def rebuild_panes(self):
         if hasattr(self, "_paned"):
             self._paned.destroy()
@@ -444,21 +468,8 @@ class CommWorkbenchUI:
             for lbl in msg_labels.values():
                 lbl.config(text="\u2014")
 
-    def _on_configure(self, _event=None):
-        try:
-            pw = self._paned.winfo_width()
-            if pw > 1:
-                self._ratios["main_display"] = self._paned.sash_coord(0)[0] / pw
-        except (tk.TclError, IndexError):
-            pass
-
     def _save_layout(self):
-        try:
-            pw = self._paned.winfo_width()
-            if pw > 1:
-                self._ratios["main_display"] = self._paned.sash_coord(0)[0] / pw
-        except (tk.TclError, IndexError):
-            pass
+        self._record_sash_ratio()
 
         self.ui_cfg["panes"] = dict(self._ratios)
         self.ui_cfg["log_view"] = self.ui_cfg.get("log_view", "mixed")
@@ -476,6 +487,9 @@ class CommWorkbenchUI:
 
     def _on_close(self):
         self.cancel_all_periodic()
+        if self._poll_after_id is not None:
+            self.root.after_cancel(self._poll_after_id)
+            self._poll_after_id = None
         if self._close_callback:
             self._close_callback("close")
         self._save_layout()

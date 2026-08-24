@@ -150,10 +150,10 @@ class App:
         if self._ui:
             self._ui._protocol_config = self._configs.get("protocol.json", {})
             self._ui._cfg_path = CONFIGS_DIR / new_name / "ui.json"
+            self._ui.apply_ui_config(self._configs.get("ui.json", {}))
             self._ui._protocol_codec = self._codec
             self._ui._parser = self._parser
             self._ui._traffic_logger = self._logger
-            self._ui._max_log_entries = self._configs.get("ui.json", {}).get("max_log_entries", 1000)
             self._ui.rebuild_panes()
             self._ui.rebuild_send_area()
             self._ui.clear_display()

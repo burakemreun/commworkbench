@@ -40,6 +40,7 @@ Config-driven binary protocol communication tool — single PyInstaller exe, tki
 - [17 — Logging + Layout Persistence](issues/17-logging-layout-persistence.md) — resolved, rotation `ui.json:max_log_entries`
 - [18 — TX State + Startup + Project Switching](issues/18-tx-state-startup-project-switching.md) — resolved, `main.py` App
 - [19 — PyInstaller Packaging](issues/19-pyinstaller-packaging.md) — resolved, exe build edildi + çalıştı (temiz makine testi yapılmadı)
+- [20 — Canlı E2E Doğrulama](issues/20-live-e2e-verification.md) — resolved, `verify_e2e.py` + `verify_session.py`; 3 bug bulundu (çift TX log, sash restore hiç çalışmıyormuş, proje değişince yeni projenin ui.json'ı eziliyormuş)
 
 ## Ticket'sız gelen iş
 
