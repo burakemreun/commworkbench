@@ -13,6 +13,12 @@ from commworkbench.constants import UI_POLL_INTERVAL_MS
 log = logging.getLogger(__name__)
 
 
+def _fmt_value(val) -> str:
+    if isinstance(val, (bytes, bytearray)):
+        return val.hex(" ")
+    return str(val)
+
+
 class CommWorkbenchUI:
     def __init__(
         self,
@@ -247,6 +253,18 @@ class CommWorkbenchUI:
                     frame.get("fields", {}),
                     frame.get("raw_hex", ""),
                 )
+        elif ftype == "unknown":
+            self._add_log_entry({
+                "type": "frame",
+                "msg_name": "[UNKNOWN]",
+                "raw_hex": frame.get("raw_hex", ""),
+                "direction": frame.get("direction", "rx"),
+                "fields": {},
+            })
+            if self._traffic_logger:
+                self._traffic_logger.log_event(
+                    frame.get("direction", "rx"), "[UNKNOWN]", {}, frame.get("raw_hex", ""),
+                )
         elif ftype == "error":
             self._add_log_entry({
                 "type": "error",
@@ -267,7 +285,7 @@ class CommWorkbenchUI:
         if msg_name in self._field_labels:
             for fname, val in fields.items():
                 if fname in self._field_labels[msg_name]:
-                    self._field_labels[msg_name][fname].config(text=str(val))
+                    self._field_labels[msg_name][fname].config(text=_fmt_value(val))
 
     def _add_log_entry(self, frame: dict):
         now = datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -276,7 +294,7 @@ class CommWorkbenchUI:
         raw_hex = frame.get("raw_hex", "")
 
         fields = frame.get("fields", {})
-        summary = " ".join(f"{k}={v}" for k, v in fields.items()) if fields else ""
+        summary = " ".join(f"{k}={_fmt_value(v)}" for k, v in fields.items()) if fields else ""
 
         values = (now, direction, f"{msg_name} {summary}", raw_hex)
         self._log_entries.append((direction, values))
@@ -330,7 +348,8 @@ class CommWorkbenchUI:
         frame.pack(fill="x", padx=4, pady=2)
 
         self._send_entries[msg_name] = {}
-        for i, field in enumerate(msg_def.get("fields", [])):
+        editable = [f for f in msg_def.get("fields", []) if "constant" not in f]
+        for i, field in enumerate(editable):
             fname = field["name"]
             ftype = field.get("type", "")
             tk.Label(frame, text=f"{fname} ({ftype}):", anchor="e", padx=4).grid(row=i, column=0, sticky="e", padx=2, pady=1)
@@ -338,7 +357,7 @@ class CommWorkbenchUI:
             entry.grid(row=i, column=1, sticky="w", padx=2, pady=1)
             self._send_entries[msg_name][fname] = entry
 
-        btn_row = len(msg_def.get("fields", []))
+        btn_row = len(editable)
 
         send_btn = tk.Button(frame, text="Send", command=lambda mn=msg_name: self._send_message(mn))
         send_btn.grid(row=btn_row, column=0, columnspan=2, sticky="w", padx=4, pady=2)
@@ -374,6 +393,8 @@ class CommWorkbenchUI:
                 elif ftype in ("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64"):
                     values[fname] = int(raw, 0)
                 elif ftype == "enum":
+                    values[fname] = raw
+                elif ftype == "bytes":
                     values[fname] = raw
                 elif ftype == "bitfield":
                     values[fname] = json.loads(raw) if raw.startswith("{") else raw

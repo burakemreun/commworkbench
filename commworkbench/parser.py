@@ -1,9 +1,8 @@
 import logging
-import struct
 import time
 
 from commworkbench.constants import FRAME_TIMEOUT_SECS, RING_BUFFER_SIZE
-from commworkbench.protocol_codec import TYPE_MAP, ProtocolCodec
+from commworkbench.protocol_codec import ProtocolCodec
 
 log = logging.getLogger(__name__)
 
@@ -11,23 +10,6 @@ SCAN = 0
 HEADER = 1
 PAYLOAD = 2
 CHECKSUM = 3
-
-
-def _field_size(field_def: dict) -> int:
-    ft = field_def["type"]
-    if ft in TYPE_MAP:
-        return struct.calcsize(TYPE_MAP[ft])
-    if ft == "enum":
-        underlying = field_def.get("enum_underlying", "uint16")
-        return struct.calcsize(TYPE_MAP.get(underlying, "H"))
-    if ft == "bitfield":
-        bits = field_def["bitfield"]["total_bits"]
-        if bits <= 8:
-            return 1
-        if bits <= 16:
-            return 2
-        return 4
-    raise ValueError(f"unknown type: {ft}")
 
 
 class Parser:
@@ -43,6 +25,7 @@ class Parser:
         self._msg_name: str | None = None
         self._msg_def: dict | None = None
         self._payload_buf = bytearray()
+        self._skipped = bytearray()
         self._checksum_buf = bytearray()
         self._output: list[dict] = []
         self._last_feed_time = time.time()
@@ -108,7 +91,7 @@ class Parser:
         self._checksum_buf.clear()
 
     def _payload_size(self) -> int:
-        return sum(_field_size(f) for f in self._msg_def["fields"])
+        return sum(self._codec.field_size(f) for f in self._msg_def["fields"])
 
     def _process(self):
         while True:
@@ -117,17 +100,20 @@ class Parser:
             if self._state == SCAN:
                 peek = self._peek_bytes(self._id_size)
                 if peek is None:
+                    self._flush_skipped()
                     break
                 msg_id = self._codec.unpack_id(peek)
                 if msg_id in self._id_to_msg:
+                    self._flush_skipped()
                     self._frame_start = self._read_ptr
                     self._read_ptr = (self._read_ptr + self._id_size) % RING_BUFFER_SIZE
                     self._msg_name, self._msg_def = self._id_to_msg[msg_id]
                     self._payload_buf.clear()
                     self._state = HEADER
                 else:
-                    # not a known ID here: resync one byte at a time
-                    self._read_byte()
+                    # not a known ID here: resync one byte at a time, keeping the
+                    # bytes so the traffic log can show what came in
+                    self._skipped.append(self._read_byte())
 
             elif self._state == HEADER:
                 self._state = PAYLOAD
@@ -162,6 +148,16 @@ class Parser:
                     self._decode_and_emit()
                     continue
                 break
+
+    def _flush_skipped(self):
+        if not self._skipped:
+            return
+        self._output.append({
+            "type": "unknown",
+            "raw_hex": bytes(self._skipped).hex(),
+            "direction": "rx",
+        })
+        self._skipped.clear()
 
     def _decode_and_emit(self):
         id_bytes = self._codec.pack_id(self._msg_def["id"])

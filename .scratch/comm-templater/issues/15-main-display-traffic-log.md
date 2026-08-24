@@ -17,7 +17,7 @@ Blocked by: 13, 14
 - [x] Split view mode: TX and RX in separate panes — dikey PanedWindow, iki Treeview (#21)
 - [x] View mode toggle in UI — status bar'da mixed/split combobox, `ui.json:log_view`'e yazılıyor; geçişte satır geçmişi korunuyor
 - [x] Queue polling on root.after(50ms)
-- [x] Unknown message IDs show as raw hex in Unknown tab + log
+- [x] Unknown message IDs show as raw hex in the traffic log (`[UNKNOWN]` satırı + `comm.log` bloğu) — ayrı Unknown tab yok, #22'de gerçekten uygulandı (öncesinde sessizce düşüyordu)
 - [x] Decode errors logged to traffic log, no popups
 - [x] Connection status events update LED indicator
 - [x] Verifiable: connect to device, see decoded messages in tabs and traffic in log

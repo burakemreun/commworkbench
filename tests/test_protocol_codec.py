@@ -183,6 +183,88 @@ def test_id_size():
         raise AssertionError("id_size 3 must be rejected")
 
 
+def test_endianness_hierarchy():
+    # field beats message beats protocol; "inherit" must fall through, never
+    # quietly become little-endian
+    proto = {
+        "protocol": {"name": "T", "version": "1.0", "endianness": "big"},
+        "checksum": {"enabled": False},
+        "messages": {
+            "M": {
+                "id": 1,
+                "endianness": "little",
+                "fields": [
+                    {"name": "from_msg", "type": "uint16"},
+                    {"name": "inherited", "type": "uint16", "endianness": "inherit"},
+                    {"name": "from_field", "type": "uint16", "endianness": "big"},
+                ],
+            },
+            "P": {
+                "id": 2,
+                "fields": [{"name": "from_proto", "type": "uint16", "endianness": "inherit"}],
+            },
+        },
+    }
+    codec = ProtocolCodec(proto)
+    enc = codec.encode("M", {"from_msg": 1, "inherited": 1, "from_field": 1})
+    assert enc[1:3] == bytes([0x01, 0x00]), enc.hex()   # message says little
+    assert enc[3:5] == bytes([0x01, 0x00]), enc.hex()   # inherit -> message
+    assert enc[5:7] == bytes([0x00, 0x01]), enc.hex()   # field overrides
+    assert codec.decode("M", enc) == {"from_msg": 1, "inherited": 1, "from_field": 1}
+
+    # no message level: inherit reaches the protocol, which is big-endian
+    assert codec.encode("P", {"from_proto": 1})[1:3] == bytes([0x00, 0x01])
+
+    try:
+        ProtocolCodec({"protocol": {"endianness": "middle"}}).encode("X", {})
+    except (ValueError, KeyError):
+        pass
+    else:
+        raise AssertionError("a bogus endianness must not be silently accepted")
+
+
+def test_bytes_type():
+    proto = {
+        "protocol": {"name": "T", "version": "1.0", "endianness": "little"},
+        "checksum": {"enabled": False},
+        "messages": {"M": {"id": 1, "fields": [{"name": "mac", "type": "bytes", "size": 4}]}},
+    }
+    codec = ProtocolCodec(proto)
+    assert codec.decode("M", codec.encode("M", {"mac": b"abcd"}))["mac"] == b"abcd"
+    # the send form hands over hex text
+    assert codec.encode("M", {"mac": "de ad be ef"})[1:] == bytes.fromhex("deadbeef")
+    assert codec.encode("M", {"mac": [1, 2, 3, 4]})[1:] == bytes([1, 2, 3, 4])
+    # short pads, long truncates, empty is all zeros (documented behaviour)
+    assert codec.encode("M", {"mac": b"ab"})[1:] == bytes([0x61, 0x62, 0, 0])
+    assert codec.encode("M", {"mac": b"abcdef"})[1:] == b"abcd"
+    assert codec.encode("M", {"mac": None})[1:] == bytes(4)
+
+
+def test_constant_field():
+    # constants carry direction-dependent IDs the user never types
+    proto = {
+        "protocol": {"name": "T", "version": "1.0", "endianness": "little"},
+        "checksum": {"enabled": False},
+        "messages": {
+            "M": {
+                "id": 1,
+                "fields": [
+                    {"name": "sender_id", "type": "uint8", "constant": 2},
+                    {"name": "value", "type": "uint8", "min": 0, "max": 9},
+                ],
+            }
+        },
+    }
+    codec = ProtocolCodec(proto)
+    encoded = codec.encode("M", {"value": 5})
+    assert encoded == bytes([1, 2, 5]), encoded.hex()
+    # user input for a constant is ignored, not encoded
+    assert codec.encode("M", {"sender_id": 99, "value": 5}) == encoded
+    assert codec.decode("M", encoded) == {"sender_id": 2, "value": 5}
+    # and a constant is never validated as if it were user input
+    assert codec.validate("M", {"sender_id": 99, "value": 5}) == []
+
+
 if __name__ == "__main__":
     test_roundtrip()
     test_bitfield()
@@ -191,4 +273,7 @@ if __name__ == "__main__":
     test_enum_mapping()
     test_step_constraint()
     test_id_size()
+    test_endianness_hierarchy()
+    test_bytes_type()
+    test_constant_field()
     print("all tests passed")

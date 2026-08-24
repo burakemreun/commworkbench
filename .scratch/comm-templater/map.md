@@ -42,6 +42,7 @@ Config-driven binary protocol communication tool — single PyInstaller exe, tki
 - [19 — PyInstaller Packaging](issues/19-pyinstaller-packaging.md) — resolved, exe build edildi + çalıştı (temiz makine testi yapılmadı)
 - [20 — Canlı E2E Doğrulama](issues/20-live-e2e-verification.md) — resolved, `verify_e2e.py` + `verify_session.py`; 3 bug bulundu (çift TX log, sash restore hiç çalışmıyormuş, proje değişince yeni projenin ui.json'ı eziliyormuş)
 - [21 — Ertelenen İşlerin Kapatılması](issues/21-close-out-deferrals.md) — resolved, split log view + `step` + `protocol.id_size` + append-only log rotation; debt ledger boş
+- [22 — Doküman/Kod Uyuşmazlıkları](issues/22-doc-vs-code-gaps.md) — resolved, byte order hiyerarşisi + `inherit` bug'ı, bilinmeyen ID'ler artık loglanıyor, `bytes` ve `constant` field tipleri
 
 ## Ticket'sız gelen iş
 

@@ -134,6 +134,13 @@ def main():
         assert content.count("---") >= 3, "expected status + tx + rx blocks"
         print(f"  comm.log blocks: OK ({content.count(chr(10) + '---') + 1} blocks)")
 
+        ui._queue.put({"type": "data", "raw": bytes([0xAB, 0xCD])})
+        assert pump_until(root, lambda: any("[UNKNOWN]" in r[2] for r in rows(ui, "RX")), 3),             "unknown traffic never reached the log"
+        unknown = [r for r in rows(ui, "RX") if "[UNKNOWN]" in r[2]][0]
+        assert unknown[3] == "abcd", unknown
+        assert "[UNKNOWN]" in log_path.read_text(encoding="utf-8"), "unknown traffic missing from comm.log"
+        print("  unknown IDs surfaced (log + comm.log): OK")
+
         info = ui._periodic[TX_MSG]
         info["interval_entry"].delete(0, "end")
         info["interval_entry"].insert(0, "200")

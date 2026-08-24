@@ -100,9 +100,10 @@ Keyed by a PascalCase identifier (used as internal key). Each message defines on
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `id` | integer 0-255 | yes | 1-byte message type ID in the wire header |
+| `id` | integer | yes | Message type ID in the wire header. Must fit `protocol.id_size` bytes (0-255 by default) |
 | `name` | string | yes | Human-readable display name |
 | `direction` | `"tx"` or `"rx"` | no | `tx` = sent by app, `rx` = received from device |
+| `endianness` | `"little"`, `"big"`, or `"inherit"` | no | Byte order for this message (default: inherit from `protocol`) |
 | `description` | string | no | Optional description |
 | `fields` | array | yes | Ordered field definitions (see below) |
 
@@ -116,7 +117,7 @@ Each entry in `fields[]` has:
 |-------|------|----------|-------------|
 | `name` | string | yes | Field name (snake_case) |
 | `type` | string | yes | One of the types below |
-| `endianness` | `"little"`, `"big"`, or `"inherit"` | no | Override global endianness (default: inherit) |
+| `endianness` | `"little"`, `"big"`, or `"inherit"` | no | Byte order for this field. Resolved field then message then `protocol`; `"inherit"` falls through to the next level. An unknown value is an error, never a silent default. |
 | `constant` | integer | no | Fixed value. Encode always writes this, decode returns this. Ignores user input. |
 | `min` | number | no | Minimum valid value |
 | `max` | number | no | Maximum valid value |
@@ -186,6 +187,7 @@ Fixed-size byte array. Requires `"size"` to specify the byte count.
 ```
 
 - **Encode:** accepts `bytes`, `bytearray`, or `list[int]`. Pads with `\x00` if shorter, truncates if longer.
+- Also accepts a hex string (`"deadbeef"` or `"de ad be ef"`) - that is what the send form types.
 - **Decode:** returns a `bytes` object of exactly `size` length.
 
 ```json

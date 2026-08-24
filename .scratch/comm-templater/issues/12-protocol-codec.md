@@ -17,5 +17,5 @@ Blocked by: 11
 - [x] Bitfield encode/decode via masking/shifting (start_bit, length)
 - [x] Constraint validation (min, max, step) on encode — `validate()`; `step` değeri `min + k*step` olmalı (float alanlarda 1e-6 tolerans), bkz. #21
 - [x] Checksum computation and verification (CRC8/16/32, XOR, sum)
-- [x] Hierarchical byte order (protocol → message → field level)
+- [x] Hierarchical byte order (protocol → message → field level) — #22'de gerçekten uygulandı; öncesinde yalnız field seviyesi vardı ve `"inherit"` sessizce little-endian'a düşüyordu
 - [x] Verifiable: encode→decode roundtrip for each field type produces identical dict

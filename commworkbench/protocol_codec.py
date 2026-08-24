@@ -24,7 +24,10 @@ CRC16_VARIANTS = {
 
 
 def _endian_char(endianness: str) -> str:
-    return ENDIAN_MAP.get(endianness, "<")
+    # a typo here would silently swap the byte order on the wire, so it is fatal
+    if endianness not in ENDIAN_MAP:
+        raise ValueError(f"unknown endianness: {endianness!r}")
+    return ENDIAN_MAP[endianness]
 
 
 def _enum_fwd(enum_def: dict) -> dict[int, str]:
@@ -108,8 +111,20 @@ class ProtocolCodec:
     def unpack_id(self, buf: bytes) -> int:
         return self._unpack(buf[:self.id_size], ID_TYPE_MAP[self.id_size], self.endianness)
 
-    def _field_endian(self, field_def: dict) -> str:
-        return field_def.get("endianness", self.endianness)
+    @staticmethod
+    def field_size(field_def: dict) -> int:
+        if field_def["type"] == "bytes":
+            return field_def["size"]
+        return _type_info(field_def)[1]
+
+    def _field_endian(self, field_def: dict, msg_def: dict | None = None) -> str:
+        """Byte order is hierarchical: field, then message, then protocol."""
+        for source in (field_def, msg_def):
+            if source:
+                endian = source.get("endianness", "inherit")
+                if endian != "inherit":
+                    return endian
+        return self.endianness
 
     def _pack(self, value: Any, type_char: str, endian: str) -> bytes:
         return struct.pack(f"{_endian_char(endian)}{type_char}", value)
@@ -117,9 +132,13 @@ class ProtocolCodec:
     def _unpack(self, buf: bytes, type_char: str, endian: str) -> Any:
         return struct.unpack(f"{_endian_char(endian)}{type_char}", buf)[0]
 
-    def _encode_field(self, field_def: dict, value: Any) -> bytes:
+    def _encode_field(self, field_def: dict, value: Any, msg_def: dict | None = None) -> bytes:
         ft = field_def["type"]
-        endian = self._field_endian(field_def)
+        endian = self._field_endian(field_def, msg_def)
+        if "constant" in field_def:
+            value = field_def["constant"]
+        if ft == "bytes":
+            return self._encode_bytes(field_def, value)
         if ft == "enum":
             mapping = self.enums.get(field_def.get("enum_ref", ""), {})
             int_val = _enum_inv(mapping).get(value, value) if isinstance(value, str) else value
@@ -129,6 +148,20 @@ class ProtocolCodec:
             return self._encode_bitfield(field_def, value, endian)
         type_char, _ = _type_info(field_def)
         return self._pack(value, type_char, endian)
+
+    def _encode_bytes(self, field_def: dict, value: Any) -> bytes:
+        size = field_def["size"]
+        if value is None:
+            raw = b""
+        elif isinstance(value, (bytes, bytearray)):
+            raw = bytes(value)
+        elif isinstance(value, str):
+            # what the send form hands over: "aa bb cc" or "aabbcc"
+            raw = bytes.fromhex(value.replace(" ", ""))
+        else:
+            raw = bytes(value)
+        raw = raw[:size]
+        return raw + bytes(size - len(raw))
 
     def _encode_bitfield(self, field_def: dict, values: dict, endian: str) -> bytes:
         bf = field_def["bitfield"]
@@ -162,9 +195,15 @@ class ProtocolCodec:
             offset += width
         return result
 
-    def _decode_field(self, field_def: dict, data: bytes, offset: int) -> tuple[Any, int]:
+    def _decode_field(self, field_def: dict, data: bytes, offset: int,
+                      msg_def: dict | None = None) -> tuple[Any, int]:
         ft = field_def["type"]
-        endian = self._field_endian(field_def)
+        endian = self._field_endian(field_def, msg_def)
+        if "constant" in field_def:
+            return field_def["constant"], offset + self.field_size(field_def)
+        if ft == "bytes":
+            size = field_def["size"]
+            return bytes(data[offset:offset + size]), offset + size
         if ft == "enum":
             type_char, size = _type_info(field_def)
             int_val = self._unpack(data[offset:offset + size], type_char, endian)
@@ -188,7 +227,7 @@ class ProtocolCodec:
         header = self.pack_id(msg_def["id"])
         payload = b""
         for field_def in msg_def["fields"]:
-            payload += self._encode_field(field_def, field_values.get(field_def["name"]))
+            payload += self._encode_field(field_def, field_values.get(field_def["name"]), msg_def)
         body = header + payload
         if self._checksum_fn is None:
             return body
@@ -209,7 +248,7 @@ class ProtocolCodec:
         offset = self.id_size
         result = {}
         for field_def in msg_def["fields"]:
-            val, offset = self._decode_field(field_def, data, offset)
+            val, offset = self._decode_field(field_def, data, offset, msg_def)
             result[field_def["name"]] = val
         if self._checksum_fn is not None:
             expected = self._unpack(data[offset:], self._checksum_type_char(), self.endianness)
@@ -231,6 +270,8 @@ class ProtocolCodec:
             return [f"unknown message: {msg_name}"]
         for field_def in msg_def["fields"]:
             name = field_def["name"]
+            if "constant" in field_def:
+                continue
             val = field_values.get(name)
             if val is None:
                 continue

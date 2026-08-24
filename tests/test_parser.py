@@ -90,9 +90,51 @@ def test_wide_id_framing():
     encoded = codec.encode("Wide", {"value": 1234})
     parser.feed(bytes([0x01, 0xFF]) + encoded)
     frames = parser.get_frames()
+    assert len(frames) == 2, frames
+    assert frames[0]["type"] == "unknown" and frames[0]["raw_hex"] == "01ff", frames[0]
+    assert frames[1]["fields"]["value"] == 1234
+    assert frames[1]["msg_id"] == 300
+
+
+def test_unknown_id_reported():
+    # unexpected traffic must be visible in the log, not silently dropped
+    codec = ProtocolCodec(PROTO)
+    parser = Parser(PROTO)
+    parser.feed(bytes([0x07, 0x99, 0xAB]))
+    out = parser.get_frames()
+    assert len(out) == 1, out
+    assert out[0]["type"] == "unknown", out[0]
+    assert out[0]["raw_hex"] == "0799ab", out[0]
+
+    # and a good frame right after still parses, reported after the garbage
+    parser.feed(bytes([0x42]) + codec.encode("SensorData", {"device_id": 7, "temperature": 1.0, "humidity": 2}))
+    out = parser.get_frames()
+    assert [f["type"] for f in out] == ["unknown", "frame"], out
+    assert out[0]["raw_hex"] == "42", out[0]
+    assert out[1]["fields"]["device_id"] == 7
+
+
+def test_bytes_and_constant_framing():
+    # the frame sizer must know about bytes fields, or the state machine stalls
+    proto = {
+        "protocol": {"name": "T", "version": "1.0", "endianness": "little"},
+        "checksum": {"enabled": True, "algorithm": "xor", "covers": "payload"},
+        "messages": {
+            "Blob": {
+                "id": 5, "direction": "rx",
+                "fields": [
+                    {"name": "sender_id", "type": "uint8", "constant": 2},
+                    {"name": "raw", "type": "bytes", "size": 3},
+                ],
+            }
+        },
+    }
+    codec = ProtocolCodec(proto)
+    parser = Parser(proto)
+    parser.feed(codec.encode("Blob", {"raw": "aabbcc"}))
+    frames = parser.get_frames()
     assert len(frames) == 1, frames
-    assert frames[0]["fields"]["value"] == 1234
-    assert frames[0]["msg_id"] == 300
+    assert frames[0]["fields"] == {"sender_id": 2, "raw": bytes.fromhex("aabbcc")}, frames[0]
 
 
 if __name__ == "__main__":
@@ -101,4 +143,6 @@ if __name__ == "__main__":
     test_parse_multiple_frames()
     test_partial_frame_no_hang()
     test_wide_id_framing()
+    test_unknown_id_reported()
+    test_bytes_and_constant_framing()
     print("all tests passed")
