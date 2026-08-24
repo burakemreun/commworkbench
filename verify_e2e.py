@@ -57,10 +57,11 @@ def wait_port(host: str, port: int, timeout: float) -> bool:
 
 def rows(ui, direction: str) -> list[tuple]:
     out = []
-    for iid in ui._tree.get_children():
-        vals = ui._tree.item(iid, "values")
-        if vals[1] == direction:
-            out.append(vals)
+    for tree in dict.fromkeys(ui._trees.values()):
+        for iid in tree.get_children():
+            vals = tree.item(iid, "values")
+            if vals[1] == direction:
+                out.append(vals)
     return out
 
 

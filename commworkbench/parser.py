@@ -34,6 +34,7 @@ class Parser:
     def __init__(self, protocol_config: dict):
         self._codec = ProtocolCodec(protocol_config)
         self._checksum_size = self._codec.checksum_size
+        self._id_size = self._codec.id_size
         self._buf = bytearray(RING_BUFFER_SIZE)
         self._write_ptr = 0
         self._read_ptr = 0
@@ -79,6 +80,16 @@ class Parser:
         self._read_ptr = (self._read_ptr + 1) % RING_BUFFER_SIZE
         return b
 
+    def _peek_bytes(self, n: int) -> bytes | None:
+        if self._available() < n:
+            return None
+        out = bytearray()
+        ptr = self._read_ptr
+        for _ in range(n):
+            out.append(self._buf[ptr])
+            ptr = (ptr + 1) % RING_BUFFER_SIZE
+        return bytes(out)
+
     def _read_bytes(self, n: int) -> bytes:
         result = bytearray()
         for _ in range(n):
@@ -104,14 +115,19 @@ class Parser:
             avail = self._available()
 
             if self._state == SCAN:
-                if avail == 0:
+                peek = self._peek_bytes(self._id_size)
+                if peek is None:
                     break
-                b = self._read_byte()
-                if b in self._id_to_msg:
-                    self._frame_start = (self._read_ptr - 1) % RING_BUFFER_SIZE
-                    self._msg_name, self._msg_def = self._id_to_msg[b]
+                msg_id = self._codec.unpack_id(peek)
+                if msg_id in self._id_to_msg:
+                    self._frame_start = self._read_ptr
+                    self._read_ptr = (self._read_ptr + self._id_size) % RING_BUFFER_SIZE
+                    self._msg_name, self._msg_def = self._id_to_msg[msg_id]
                     self._payload_buf.clear()
                     self._state = HEADER
+                else:
+                    # not a known ID here: resync one byte at a time
+                    self._read_byte()
 
             elif self._state == HEADER:
                 self._state = PAYLOAD
@@ -148,8 +164,8 @@ class Parser:
                 break
 
     def _decode_and_emit(self):
-        id_byte = struct.pack("B", self._msg_def["id"])
-        frame_data = id_byte + bytes(self._payload_buf) + bytes(self._checksum_buf)
+        id_bytes = self._codec.pack_id(self._msg_def["id"])
+        frame_data = id_bytes + bytes(self._payload_buf) + bytes(self._checksum_buf)
 
         try:
             fields = self._codec.decode(self._msg_name, frame_data)

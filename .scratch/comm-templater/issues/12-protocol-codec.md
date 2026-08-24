@@ -15,7 +15,7 @@ Blocked by: 11
 - [x] `decode(message_id, raw_bytes) -> dict` — returns `{field_name: value}` with enums mapped to labels, bitfields unpacked into named bits
 - [x] FieldTypeRegistry with dedicated handlers for int, float, enum, bitfield
 - [x] Bitfield encode/decode via masking/shifting (start_bit, length)
-- [x] Constraint validation (min, max) on encode — `validate()`. `step` uygulanmadı (hiçbir config kullanmıyor, YAGNI)
+- [x] Constraint validation (min, max, step) on encode — `validate()`; `step` değeri `min + k*step` olmalı (float alanlarda 1e-6 tolerans), bkz. #21
 - [x] Checksum computation and verification (CRC8/16/32, XOR, sum)
 - [x] Hierarchical byte order (protocol → message → field level)
 - [x] Verifiable: encode→decode roundtrip for each field type produces identical dict

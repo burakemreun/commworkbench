@@ -75,9 +75,30 @@ def test_partial_frame_no_hang():
     assert len(frames) == 0
 
 
+def test_wide_id_framing():
+    # with a 2-byte ID the scanner must match on the pair, not on a single byte,
+    # and must still resync past leading garbage
+    proto = {
+        "protocol": {"name": "T", "version": "1.0", "endianness": "big", "id_size": 2},
+        "checksum": {"enabled": True, "algorithm": "crc16", "crc_variant": "modbus", "covers": "payload"},
+        "messages": {
+            "Wide": {"id": 300, "direction": "rx", "fields": [{"name": "value", "type": "uint16"}]}
+        },
+    }
+    codec = ProtocolCodec(proto)
+    parser = Parser(proto)
+    encoded = codec.encode("Wide", {"value": 1234})
+    parser.feed(bytes([0x01, 0xFF]) + encoded)
+    frames = parser.get_frames()
+    assert len(frames) == 1, frames
+    assert frames[0]["fields"]["value"] == 1234
+    assert frames[0]["msg_id"] == 300
+
+
 if __name__ == "__main__":
     test_parse_valid_frame()
     test_parse_bad_checksum()
     test_parse_multiple_frames()
     test_partial_frame_no_hang()
+    test_wide_id_framing()
     print("all tests passed")

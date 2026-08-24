@@ -41,6 +41,7 @@ Config-driven binary protocol communication tool — single PyInstaller exe, tki
 - [18 — TX State + Startup + Project Switching](issues/18-tx-state-startup-project-switching.md) — resolved, `main.py` App
 - [19 — PyInstaller Packaging](issues/19-pyinstaller-packaging.md) — resolved, exe build edildi + çalıştı (temiz makine testi yapılmadı)
 - [20 — Canlı E2E Doğrulama](issues/20-live-e2e-verification.md) — resolved, `verify_e2e.py` + `verify_session.py`; 3 bug bulundu (çift TX log, sash restore hiç çalışmıyormuş, proje değişince yeni projenin ui.json'ı eziliyormuş)
+- [21 — Ertelenen İşlerin Kapatılması](issues/21-close-out-deferrals.md) — resolved, split log view + `step` + `protocol.id_size` + append-only log rotation; debt ledger boş
 
 ## Ticket'sız gelen iş
 
@@ -53,5 +54,4 @@ Config-driven binary protocol communication tool — single PyInstaller exe, tki
 
 ## Out of scope
 
-- Split TX/RX log view (#15) — mixed view yeterli, ihtiyaç doğarsa aç
-- `step` constraint (#12) — hiçbir config kullanmıyor
+<!-- boşaldı — ikisi de #21'de yapıldı -->

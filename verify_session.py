@@ -181,11 +181,63 @@ def part_b():
     print("  old project's ui.json untouched by the switch: OK")
 
 
+def tx_row(i):
+    return {"type": "frame", "msg_name": "QuerySensor", "fields": {"device_id": i},
+            "raw_hex": "01 0%d 00" % i, "direction": "tx"}
+
+
+def rx_row(i):
+    return {"type": "frame", "msg_name": "SensorResponse", "fields": {"device_id": i},
+            "raw_hex": "02 0%d 00" % i, "direction": "rx"}
+
+
+def part_c():
+    print()
+    print("Part C -- split TX/RX log view")
+    app = build_app(PROJECT)
+    ui = app._ui
+    root = ui.root
+
+    assert ui._trees["TX"] is ui._trees["RX"], "mixed view must share one tree"
+    ui._add_log_entry(tx_row(1))
+    ui._add_log_entry(rx_row(1))
+    assert len(ui._trees["TX"].get_children()) == 2, "mixed view lost a row"
+    print("  mixed view: OK (one chronological tree)")
+
+    ui._log_view_var.set("split")
+    ui._log_view_combo.event_generate("<<ComboboxSelected>>")
+    pump(root, 0.4)
+
+    tx_tree, rx_tree = ui._trees["TX"], ui._trees["RX"]
+    assert tx_tree is not rx_tree, "split view still shares one tree"
+    assert len(tx_tree.get_children()) == 1, tx_tree.get_children()
+    assert len(rx_tree.get_children()) == 1, rx_tree.get_children()
+    assert "QuerySensor" in tx_tree.item(tx_tree.get_children()[0], "values")[2]
+    assert "SensorResponse" in rx_tree.item(rx_tree.get_children()[0], "values")[2]
+    print("  toggle to split: OK (history kept, rows routed by direction)")
+
+    ui._add_log_entry(rx_row(2))
+    assert len(rx_tree.get_children()) == 2 and len(tx_tree.get_children()) == 1, "new row routed wrong"
+    print("  new traffic routed to its pane: OK")
+
+    close_app(app)
+    assert read_json(PROJ_DIR / "ui.json")["log_view"] == "split", "log_view not persisted"
+
+    app2 = build_app(PROJECT)
+    ui2 = app2._ui
+    assert ui2._trees["TX"] is not ui2._trees["RX"], "split view not restored from ui.json"
+    assert ui2._log_view_var.get() == "split", ui2._log_view_var.get()
+    assert not ui2._trees["TX"].get_children(), "traffic log must start empty"
+    print("  split view restored on reopen: OK")
+    close_app(app2)
+
+
 def main():
     backup = {f: (PROJ_DIR / f).read_bytes() for f in TOUCHED if (PROJ_DIR / f).exists()}
     try:
         part_a()
         part_b()
+        part_c()
         print("\nSession checks OK.")
     finally:
         for f, data in backup.items():

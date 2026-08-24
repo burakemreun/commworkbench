@@ -14,6 +14,8 @@ TYPE_MAP = {
 
 ENDIAN_MAP = {"little": "<", "big": ">"}
 
+ID_TYPE_MAP = {1: "B", 2: "H", 4: "I"}
+
 CRC8_VARIANTS = {"ccitt": Crc8.CCITT}
 CRC16_VARIANTS = {
     "modbus": Crc16.MODBUS, "xmodem": Crc16.XMODEM,
@@ -85,7 +87,11 @@ def _build_checksum(cfg: dict):
 
 class ProtocolCodec:
     def __init__(self, protocol_config: dict):
-        self.endianness = protocol_config.get("protocol", {}).get("endianness", "little")
+        proto = protocol_config.get("protocol", {})
+        self.endianness = proto.get("endianness", "little")
+        self.id_size = proto.get("id_size", 1)
+        if self.id_size not in ID_TYPE_MAP:
+            raise ValueError(f"protocol.id_size must be 1, 2 or 4, got {self.id_size}")
         self.enums = protocol_config.get("enums", {})
         self.messages = protocol_config.get("messages", {})
         self._checksum_fn, self._checksum_size, self._checksum_covers = (
@@ -95,6 +101,12 @@ class ProtocolCodec:
     @property
     def checksum_size(self) -> int:
         return self._checksum_size
+
+    def pack_id(self, msg_id: int) -> bytes:
+        return self._pack(msg_id, ID_TYPE_MAP[self.id_size], self.endianness)
+
+    def unpack_id(self, buf: bytes) -> int:
+        return self._unpack(buf[:self.id_size], ID_TYPE_MAP[self.id_size], self.endianness)
 
     def _field_endian(self, field_def: dict) -> str:
         return field_def.get("endianness", self.endianness)
@@ -173,8 +185,7 @@ class ProtocolCodec:
 
     def encode(self, msg_name: str, field_values: dict) -> bytes:
         msg_def = self.messages[msg_name]
-        # SHORTCUT: 1-byte msg ID, max 256 messages. Upgrade: add configurable header_size to protocol config.
-        header = struct.pack("B", msg_def["id"])
+        header = self.pack_id(msg_def["id"])
         payload = b""
         for field_def in msg_def["fields"]:
             payload += self._encode_field(field_def, field_values.get(field_def["name"]))
@@ -192,10 +203,10 @@ class ProtocolCodec:
 
     def decode(self, msg_name: str, data: bytes) -> dict:
         msg_def = self.messages[msg_name]
-        msg_id = struct.unpack("B", data[0:1])[0]
+        msg_id = self.unpack_id(data)
         if msg_id != msg_def["id"]:
             raise ValueError(f"message ID mismatch: expected {msg_def['id']}, got {msg_id}")
-        offset = 1
+        offset = self.id_size
         result = {}
         for field_def in msg_def["fields"]:
             val, offset = self._decode_field(field_def, data, offset)
@@ -203,9 +214,9 @@ class ProtocolCodec:
         if self._checksum_fn is not None:
             expected = self._unpack(data[offset:], self._checksum_type_char(), self.endianness)
             if self._checksum_covers == "header":
-                region = data[0:1]
+                region = data[0:self.id_size]
             elif self._checksum_covers == "payload":
-                region = data[1:offset]
+                region = data[self.id_size:offset]
             else:
                 region = data[0:offset]
             actual = self._checksum_fn(region)
@@ -227,4 +238,11 @@ class ProtocolCodec:
                 errors.append(f"{name}: value {val} below minimum {field_def['min']}")
             if "max" in field_def and val > field_def["max"]:
                 errors.append(f"{name}: value {val} above maximum {field_def['max']}")
+            step = field_def.get("step")
+            if step:
+                base = field_def.get("min", 0)
+                steps = (val - base) / step
+                # floats never land exactly on a step, so allow a relative slack
+                if abs(steps - round(steps)) > 1e-6:
+                    errors.append(f"{name}: value {val} not a multiple of step {step} from {base}")
         return errors

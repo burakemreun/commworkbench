@@ -131,10 +131,64 @@ def test_enum_mapping():
     assert decoded["state"] == "ON"
 
 
+def test_step_constraint():
+    # step is what keeps a device from being handed an unsupported setpoint
+    proto = {
+        "protocol": {"name": "T", "version": "1.0", "endianness": "little"},
+        "checksum": {"enabled": False},
+        "messages": {
+            "Setpoint": {
+                "id": 1,
+                "fields": [
+                    {"name": "angle", "type": "uint16", "min": 10, "max": 90, "step": 5},
+                    {"name": "gain", "type": "float32", "min": 0.0, "step": 0.1},
+                ],
+            }
+        },
+    }
+    codec = ProtocolCodec(proto)
+    assert codec.validate("Setpoint", {"angle": 25, "gain": 0.3}) == []
+    errors = codec.validate("Setpoint", {"angle": 27, "gain": 0.3})
+    assert len(errors) == 1 and "step 5" in errors[0], errors
+    # steps are counted from min, not from zero
+    assert codec.validate("Setpoint", {"angle": 20}) == []
+    assert codec.validate("Setpoint", {"angle": 12}) != []
+    # float arithmetic must not turn a legal value into an error
+    assert codec.validate("Setpoint", {"gain": 0.7}) == []
+    assert codec.validate("Setpoint", {"gain": 0.75}) != []
+
+
+def test_id_size():
+    # a protocol with more than 256 messages needs a wider ID; the width must
+    # follow protocol endianness and be part of the checksummed frame
+    proto = {
+        "protocol": {"name": "T", "version": "1.0", "endianness": "big", "id_size": 2},
+        "checksum": {"enabled": True, "algorithm": "crc16", "crc_variant": "modbus", "covers": "frame"},
+        "messages": {
+            "Wide": {"id": 300, "fields": [{"name": "value", "type": "uint8"}]}
+        },
+    }
+    codec = ProtocolCodec(proto)
+    assert codec.id_size == 2
+    encoded = codec.encode("Wide", {"value": 7})
+    assert encoded[0:2] == bytes([0x01, 0x2C]), encoded.hex()
+    assert len(encoded) == 2 + 1 + 2
+    assert codec.decode("Wide", encoded)["value"] == 7
+
+    try:
+        ProtocolCodec({"protocol": {"id_size": 3}})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("id_size 3 must be rejected")
+
+
 if __name__ == "__main__":
     test_roundtrip()
     test_bitfield()
     test_checksum_corrupt()
     test_constraint_validation()
     test_enum_mapping()
+    test_step_constraint()
+    test_id_size()
     print("all tests passed")

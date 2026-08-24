@@ -3,7 +3,7 @@ import tempfile
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from commworkbench.traffic_logger import TrafficLogger
+from commworkbench.traffic_logger import COMPACT_SLACK, TrafficLogger
 
 
 def test_log_event_format():
@@ -19,16 +19,28 @@ def test_log_event_format():
 
 
 def test_rotation():
+    # writes append; the file is compacted back to max_entries only after it has
+    # drifted a whole slack past the cap, and compaction must keep the newest
     with tempfile.TemporaryDirectory() as tmpdir:
         logger = TrafficLogger(Path(tmpdir), max_entries=3)
-        for i in range(5):
+        total = 3 + COMPACT_SLACK + 2
+        for i in range(total):
             logger.log_event("TX", "Msg", {"i": i}, "00")
         content = (Path(tmpdir) / "comm.log").read_text()
         blocks = [b for b in content.split("---") if b.strip()]
-        assert len(blocks) == 3
-        assert "i=2" in blocks[0]
-        assert "i=3" in blocks[1]
-        assert "i=4" in blocks[2]
+        assert len(blocks) <= 3 + COMPACT_SLACK, f"file never compacted: {len(blocks)}"
+        assert len(blocks) < total, "old blocks were not dropped"
+        assert "i=" + str(total - 1) in blocks[-1], "newest block lost"
+
+
+def test_rotation_survives_reopen():
+    # a fresh logger over an existing file must not lose the block count
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for i in range(3 + COMPACT_SLACK + 1):
+            TrafficLogger(Path(tmpdir), max_entries=3).log_event("TX", "Msg", {"i": i}, "00")
+        content = (Path(tmpdir) / "comm.log").read_text()
+        blocks = [b for b in content.split("---") if b.strip()]
+        assert len(blocks) <= 3 + COMPACT_SLACK, f"file grew unbounded: {len(blocks)}"
 
 
 def test_log_error():
@@ -53,6 +65,7 @@ def test_log_status():
 if __name__ == "__main__":
     test_log_event_format()
     test_rotation()
+    test_rotation_survives_reopen()
     test_log_error()
     test_log_status()
     print("all tests passed")

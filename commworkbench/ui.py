@@ -39,7 +39,7 @@ class CommWorkbenchUI:
         self._traffic_logger = traffic_logger
 
         self._poll_after_id = None
-        self._log_entries: list[dict] = []
+        self._log_entries: list[tuple[str, tuple]] = []
         self._field_labels: dict[str, dict[str, tk.Label]] = {}
 
         self._send_entries: dict[str, dict[str, tk.Entry]] = {}
@@ -78,6 +78,14 @@ class CommWorkbenchUI:
         )
         self._project_combo.pack(side="right", padx=6, pady=2)
         self._project_combo.bind("<<ComboboxSelected>>", self._on_project_change)
+
+        self._log_view_var = tk.StringVar(value=self.ui_cfg.get("log_view", "mixed"))
+        self._log_view_combo = ttk.Combobox(
+            bar, textvariable=self._log_view_var, state="readonly", width=6,
+            values=("mixed", "split"),
+        )
+        self._log_view_combo.pack(side="right", padx=6, pady=2)
+        self._log_view_combo.bind("<<ComboboxSelected>>", self._on_log_view_change)
 
         self._status_label = tk.Label(bar, text="Disconnected", anchor="w", padx=6)
         self._status_label.pack(side="left", fill="x", expand=True)
@@ -159,22 +167,49 @@ class CommWorkbenchUI:
         container = ttk.Frame(self._paned)
         self._paned.add(container, stretch="always")
 
+        if self.ui_cfg.get("log_view") == "split":
+            splitter = tk.PanedWindow(container, orient="vertical", sashwidth=5)
+            splitter.pack(fill="both", expand=True)
+            self._trees = {}
+            for direction in ("TX", "RX"):
+                box = ttk.LabelFrame(splitter, text=direction)
+                splitter.add(box, stretch="always")
+                self._trees[direction] = self._make_tree(box)
+        else:
+            tree = self._make_tree(container)
+            self._trees = {"TX": tree, "RX": tree}
+
+        self._replay_log_entries()
+
+    def _make_tree(self, parent) -> ttk.Treeview:
         columns = ("time", "direction", "message", "raw_hex")
-        self._tree = ttk.Treeview(container, columns=columns, show="headings", selectmode="browse")
-        self._tree.heading("time", text="Time")
-        self._tree.heading("direction", text="Dir")
-        self._tree.heading("message", text="Message")
-        self._tree.heading("raw_hex", text="Raw Hex")
-        self._tree.column("time", width=80, stretch=False)
-        self._tree.column("direction", width=40, stretch=False)
-        self._tree.column("message", width=180)
-        self._tree.column("raw_hex", width=200)
+        tree = ttk.Treeview(parent, columns=columns, show="headings", selectmode="browse")
+        tree.heading("time", text="Time")
+        tree.heading("direction", text="Dir")
+        tree.heading("message", text="Message")
+        tree.heading("raw_hex", text="Raw Hex")
+        tree.column("time", width=80, stretch=False)
+        tree.column("direction", width=40, stretch=False)
+        tree.column("message", width=180)
+        tree.column("raw_hex", width=200)
 
-        scrollbar = ttk.Scrollbar(container, orient="vertical", command=self._tree.yview)
-        self._tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
 
-        self._tree.pack(side="left", fill="both", expand=True)
+        tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
+        return tree
+
+    def _replay_log_entries(self):
+        # the rows outlive the widgets, so toggling the view keeps the history
+        for direction, values in self._log_entries:
+            self._insert_row(direction, values)
+
+    def _on_log_view_change(self, _event=None):
+        if self._log_view_var.get() == self.ui_cfg.get("log_view", "mixed"):
+            return
+        self.ui_cfg["log_view"] = self._log_view_var.get()
+        self.rebuild_panes()
 
     def _poll_queue(self):
         if self._queue is None:
@@ -243,12 +278,18 @@ class CommWorkbenchUI:
         fields = frame.get("fields", {})
         summary = " ".join(f"{k}={v}" for k, v in fields.items()) if fields else ""
 
-        self._tree.insert("", "end", values=(now, direction, f"{msg_name} {summary}", raw_hex))
+        values = (now, direction, f"{msg_name} {summary}", raw_hex)
+        self._log_entries.append((direction, values))
+        if len(self._log_entries) > self._max_log_entries:
+            del self._log_entries[:-self._max_log_entries]
+        self._insert_row(direction, values)
 
-        if len(self._tree.get_children()) > self._max_log_entries:
-            self._tree.delete(self._tree.get_children()[0])
-
-        self._tree.yview_moveto(1.0)
+    def _insert_row(self, direction: str, values: tuple):
+        tree = self._trees.get(direction) or self._trees["RX"]
+        tree.insert("", "end", values=values)
+        if len(tree.get_children()) > self._max_log_entries:
+            tree.delete(tree.get_children()[0])
+        tree.yview_moveto(1.0)
 
     def _build_send_area(self):
         self._send_outer = tk.Frame(self.root, relief="sunken", bd=1)
@@ -424,6 +465,7 @@ class CommWorkbenchUI:
         self.ui_cfg = ui_cfg
         self._ratios = dict(ui_cfg.get("panes", {"main_display": 0.5}))
         self._max_log_entries = ui_cfg.get("max_log_entries", 1000)
+        self._log_view_var.set(ui_cfg.get("log_view", "mixed"))
         geo = ui_cfg.get("geometry", {})
         if "width" in geo and "height" in geo:
             self.root.geometry(f"{geo['width']}x{geo['height']}")
@@ -467,6 +509,11 @@ class CommWorkbenchUI:
         for msg_labels in self._field_labels.values():
             for lbl in msg_labels.values():
                 lbl.config(text="\u2014")
+
+        # traffic belongs to the project it came from
+        self._log_entries.clear()
+        for tree in dict.fromkeys(self._trees.values()):
+            tree.delete(*tree.get_children())
 
     def _save_layout(self):
         self._record_sash_ratio()

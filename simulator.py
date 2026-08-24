@@ -71,7 +71,7 @@ def calc_field_size(field_def: dict) -> int:
 def calc_frame_size(codec: ProtocolCodec, msg_name: str) -> int:
     msg_def = codec.messages[msg_name]
     payload_size = sum(calc_field_size(f) for f in msg_def["fields"])
-    return 1 + payload_size + codec.checksum_size
+    return codec.id_size + payload_size + codec.checksum_size
 
 
 def generate_response(rx_name: str, request_fields: dict) -> dict:

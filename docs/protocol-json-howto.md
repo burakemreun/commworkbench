@@ -48,6 +48,7 @@ Wire format: [1-byte msg ID] [payload fields...] [checksum bytes]
 | `name` | string | yes | Protocol identifier |
 | `version` | string | yes | Version string |
 | `endianness` | `"little"` or `"big"` | yes | Global byte order. Overridable per-field. |
+| `id_size` | `1`, `2` or `4` | no | Message ID width in bytes (default `1`, i.e. max 256 messages). Written in the global byte order. |
 
 ---
 
@@ -119,6 +120,7 @@ Each entry in `fields[]` has:
 | `constant` | integer | no | Fixed value. Encode always writes this, decode returns this. Ignores user input. |
 | `min` | number | no | Minimum valid value |
 | `max` | number | no | Maximum valid value |
+| `step` | number | no | Value must be `min + k * step` (`min` defaults to 0). Rejected before encoding. |
 | `enum_ref` | string | no | Reference to an enum name (required if type is `"enum"`) |
 | `description` | string | no | Optional description |
 
