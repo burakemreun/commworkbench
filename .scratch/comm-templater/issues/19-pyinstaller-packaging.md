@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Type: task
 Blocked by: 11, 12, 13, 14, 15, 16, 17, 18
 
@@ -8,10 +8,14 @@ Blocked by: 11, 12, 13, 14, 15, 16, 17, 18
 
 **Blocked by:** All previous tickets (11–18).
 
-**Status:** ready-for-agent
+**Status:** resolved — PyInstaller 6.22.2 / Python 3.14 ile build edildi
 
-- [ ] PyInstaller spec file configured for tkinter
-- [ ] All dependencies bundled (pyserial, crc)
-- [ ] Single .exe output
-- [ ] Launches full application on clean Windows machine
-- [ ] Verifiable: run exe on machine without Python, app launches and functions
+- [x] PyInstaller spec file configured for tkinter (`CommWorkbench.spec`, `build.bat`)
+- [x] All dependencies bundled (`hiddenimports=['crc', 'serial']`)
+- [x] Single .exe output — `dist/CommWorkbench.exe` (~10 MB, onefile, windowed)
+- [x] Launches full application — exe `dist/configs/Test1`'i okudu, simülatöre TCP bağlandı, `comm.log`'u exe'nin yanına yazdı
+- [ ] Temiz (Python'suz) makinede test edilmedi — bu makinede Python kurulu
+
+**Notlar:**
+- `config_loader.CONFIGS_DIR` artık `sys.frozen` ise `Path(sys.executable).parent / "configs"`; `main.py` ve `ui.py` bu tek kaynaktan alıyor
+- exe'nin yanına `configs/` klasörü kopyalanmalı (`build.bat` bunu hatırlatıyor)

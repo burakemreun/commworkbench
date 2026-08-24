@@ -27,19 +27,24 @@ Config-driven binary protocol communication tool — single PyInstaller exe, tki
 - [Periodic Send & Logging](issues/07-periodic-send-and-logging.md) — Periodic send via tkinter.after(), ephemeral state, checkbox+interval UI per message. Single combined log per project (block format), configurable rotation, all traffic logged
 - [Layout Persistence Detail](issues/08-layout-persistence-detail.md) — `ui.json` with version/geometry/log_view/panes(ratio), atomic save, minimal properties, ratio-based pane positions
 - [Startup Sequence & Config Load Handling](issues/09-startup-sequence-config-load-handling.md) — Loading order protocol→connection→ui→tx-state, missing configs use defaults+log, invalid JSON skip+log with line, schema mismatch per-field defaults, unknown IDs show raw hex in log, first launch empty shell with create prompt, last-used project in separate app-state.json
-- [Full MVP Spec](issues/10-full-mvp-spec.md) — Complete MVP implementation spec: queue.Queue seam, 9 modules in dependency order, 45 user stories, testing decisions, out of scope. Status: ready-for-agent
+- [Full MVP Spec](issues/10-full-mvp-spec.md) — Complete MVP implementation spec: queue.Queue seam, 9 modules in dependency order, 45 user stories, testing decisions, out of scope. resolved
 
 ## Implementation Tickets (tracer bullets)
 
-- [11 — Scaffold + ConfigLoader](issues/11-scaffold-configloader.md) — Project setup + config loading. Blocked by: none
-- [12 — ProtocolCodec](issues/12-protocol-codec.md) — Encode/decode. Blocked by: 11
-- [13 — Backend Pipeline](issues/13-backend-pipeline.md) — ConnectionManager + Parser + queue. Blocked by: 11, 12
-- [14 — UI Skeleton + LED](issues/14-ui-skeleton-led.md) — tkinter window + LED. Blocked by: 11
-- [15 — Main Display + Traffic Log](issues/15-main-display-traffic-log.md) — Tabs + Treeview. Blocked by: 13, 14
-- [16 — Send Area + Periodic Send](issues/16-send-area-periodic-send.md) — Forms + interval send. Blocked by: 12, 13, 15
-- [17 — Logging + Layout Persistence](issues/17-logging-layout-persistence.md) — comm.log + ui.json. Blocked by: 13, 15
-- [18 — TX State + Startup + Project Switching](issues/18-tx-state-startup-project-switching.md) — Restore values + project menu. Blocked by: 11, 16
-- [19 — PyInstaller Packaging](issues/19-pyinstaller-packaging.md) — Single exe. Blocked by: 11–18
+- [11 — Scaffold + ConfigLoader](issues/11-scaffold-configloader.md) — resolved, `config_loader.py`
+- [12 — ProtocolCodec](issues/12-protocol-codec.md) — resolved, `protocol_codec.py` (`step` constraint yok)
+- [13 — Backend Pipeline](issues/13-backend-pipeline.md) — resolved, `connection_manager.py` + `parser.py`
+- [14 — UI Skeleton + LED](issues/14-ui-skeleton-led.md) — resolved, `ui.py`
+- [15 — Main Display + Traffic Log](issues/15-main-display-traffic-log.md) — resolved, split view ertelendi
+- [16 — Send Area + Periodic Send](issues/16-send-area-periodic-send.md) — resolved, `ui.py` send/periodic
+- [17 — Logging + Layout Persistence](issues/17-logging-layout-persistence.md) — resolved, rotation `ui.json:max_log_entries`
+- [18 — TX State + Startup + Project Switching](issues/18-tx-state-startup-project-switching.md) — resolved, `main.py` App
+- [19 — PyInstaller Packaging](issues/19-pyinstaller-packaging.md) — resolved, exe build edildi + çalıştı (temiz makine testi yapılmadı)
+
+## Ticket'sız gelen iş
+
+- TX/RX yön desteği (`direction` alanı), `simulator.py`, `configs/Test1/` — commit ff0866f
+- [docs/protocol-json-howto.md](../../docs/protocol-json-howto.md) — protocol.json yazım kılavuzu
 
 ## Not yet specified
 
@@ -47,4 +52,5 @@ Config-driven binary protocol communication tool — single PyInstaller exe, tki
 
 ## Out of scope
 
-<!-- nothing ruled out yet -->
+- Split TX/RX log view (#15) — mixed view yeterli, ihtiyaç doğarsa aç
+- `step` constraint (#12) — hiçbir config kullanmıyor

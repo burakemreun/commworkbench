@@ -3,7 +3,7 @@ import logging
 import queue
 from pathlib import Path
 
-from commworkbench.config_loader import ConfigLoader
+from commworkbench.config_loader import CONFIGS_DIR, ConfigLoader
 from commworkbench.connection_manager import ConnectionManager
 from commworkbench.parser import Parser
 from commworkbench.protocol_codec import ProtocolCodec
@@ -12,7 +12,6 @@ from commworkbench.ui import CommWorkbenchUI
 
 log = logging.getLogger(__name__)
 
-CONFIGS_DIR = Path("configs")
 APP_STATE_PATH = CONFIGS_DIR / "_app-state.json"
 
 
@@ -81,7 +80,8 @@ class App:
         self._configs = self._loader.load_project(name)
         self._codec = ProtocolCodec(self._configs.get("protocol.json", {}))
         self._parser = Parser(self._configs.get("protocol.json", {}))
-        self._logger = TrafficLogger(CONFIGS_DIR / name)
+        max_entries = self._configs.get("ui.json", {}).get("max_log_entries", 1000)
+        self._logger = TrafficLogger(CONFIGS_DIR / name, max_entries)
 
     def _start_ui(self):
         self._conn_mgr = ConnectionManager(
@@ -152,6 +152,8 @@ class App:
             self._ui._cfg_path = CONFIGS_DIR / new_name / "ui.json"
             self._ui._protocol_codec = self._codec
             self._ui._parser = self._parser
+            self._ui._traffic_logger = self._logger
+            self._ui._max_log_entries = self._configs.get("ui.json", {}).get("max_log_entries", 1000)
             self._ui.rebuild_panes()
             self._ui.rebuild_send_area()
             self._ui.clear_display()

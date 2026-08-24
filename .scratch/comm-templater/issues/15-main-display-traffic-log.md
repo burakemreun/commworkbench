@@ -1,4 +1,4 @@
-Status: done
+Status: resolved
 Type: task
 Blocked by: 13, 14
 
@@ -8,7 +8,7 @@ Blocked by: 13, 14
 
 **Blocked by:** 13 (backend pipeline delivering DecodedFrames to queue), 14 (UI skeleton with PanedWindow and placeholders).
 
-**Status:** done
+**Status:** resolved — split view bilerek ertelendi (aşağıdaki 2 kutu), mixed view yeterli
 
 - [x] Tabbed main display: one tab per message type from protocol.json
 - [x] Each tab shows latest decoded dict for that message type

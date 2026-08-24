@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Type: task
 Blocked by: 11
 
@@ -8,15 +8,15 @@ Blocked by: 11
 
 **Blocked by:** 11 (needs ConfigLoader for ui.json reading).
 
-**Status:** ready-for-agent
+**Status:** resolved — `commworkbench/ui.py`, verify: `verify_ui.py`
 
-- [ ] tkinter main window with status bar at top
-- [ ] Horizontal PanedWindow: tabbed main display (placeholder) | traffic log (placeholder)
-- [ ] Scrollable send area at bottom (placeholder)
-- [ ] LED indicator: tk.Canvas oval (green=connected, red=disconnected) + text label
-- [ ] LED text shows connection details (IP:port or COM@baud)
-- [ ] Layout restore from ui.json on launch (geometry, log_view, panes ratio)
-- [ ] Defaults on first launch: 1200x800 centered, mixed log, 50/50 split
-- [ ] Atomic save on exit: write to ui.json.tmp, os.rename over ui.json
-- [ ] Ratio-based pane positions (survive window resizing)
-- [ ] Verifiable: app launches, LED shows disconnected, layout restores after resize+restart
+- [x] tkinter main window with status bar at top
+- [x] Horizontal PanedWindow: tabbed main display (placeholder) | traffic log (placeholder)
+- [x] Scrollable send area at bottom (placeholder)
+- [x] LED indicator: tk.Canvas oval (green=connected, red=disconnected) + text label
+- [x] LED text shows connection details (IP:port or COM@baud)
+- [x] Layout restore from ui.json on launch (geometry, log_view, panes ratio)
+- [x] Defaults on first launch: 1200x800 centered, mixed log, 50/50 split
+- [x] Atomic save on exit: write to ui.json.tmp, os.rename over ui.json
+- [x] Ratio-based pane positions (survive window resizing)
+- [x] Verifiable: app launches, LED shows disconnected, layout restores after resize+restart

@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Type: task
 Blocked by: 11, 16
 
@@ -8,16 +8,16 @@ Blocked by: 11, 16
 
 **Blocked by:** 11 (ConfigLoader for project discovery and config loading), 16 (Send area to restore TX values into).
 
-**Status:** ready-for-agent
+**Status:** resolved — `main.py` `App`, verify: `verify_startup.py`. Not: app-state dosyası `configs/_app-state.json`
 
-- [ ] tx-state.json saves last-used TX field values per message type
-- [ ] TX state restored on launch (values populated in send forms)
-- [ ] Config loading order: protocol → connection → ui → tx-state
-- [ ] Project switching via UI dropdown menu
-- [ ] Auto-discovers project folders in configs/
-- [ ] Switches configs mid-session (reloads all modules)
-- [ ] app-state.json stores last-used project name
-- [ ] Last project restored on launch
-- [ ] First-launch: empty shell with "Create Project" hint
-- [ ] If saved project missing → "no project loaded" fallback
-- [ ] Verifiable: fill send fields, restart, see values restored. Switch projects, see different configs load.
+- [x] tx-state.json saves last-used TX field values per message type
+- [x] TX state restored on launch (values populated in send forms)
+- [x] Config loading order: protocol → connection → ui → tx-state
+- [x] Project switching via UI dropdown menu
+- [x] Auto-discovers project folders in configs/
+- [x] Switches configs mid-session (reloads all modules)
+- [x] app-state.json stores last-used project name
+- [x] Last project restored on launch
+- [x] First-launch: empty shell with "Create Project" hint
+- [x] If saved project missing → "no project loaded" fallback
+- [x] Verifiable: fill send fields, restart, see values restored. Switch projects, see different configs load.

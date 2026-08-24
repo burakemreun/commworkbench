@@ -1,10 +1,16 @@
 import json
 import logging
+import sys
 from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-CONFIGS_DIR = Path("configs")
+# frozen exe: configs live next to the exe, not in the unpack dir or the launch CWD
+CONFIGS_DIR = (
+    Path(sys.executable).resolve().parent / "configs"
+    if getattr(sys, "frozen", False)
+    else Path("configs")
+)
 EXPECTED_FILES = ("connection.json", "protocol.json", "ui.json", "tx-state.json")
 
 DEFAULT_CONNECTION = {
@@ -18,6 +24,7 @@ DEFAULT_UI = {
     "geometry": {"width": 1200, "height": 800},
     "log_view": "mixed",
     "panes": {"main_display": 0.5, "send_area": 0.5},
+    "max_log_entries": 1000,
 }
 
 DEFAULT_TX_STATE: dict[str, dict] = {}

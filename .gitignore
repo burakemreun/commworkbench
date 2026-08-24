@@ -8,3 +8,7 @@ build/
 venv/
 .venv/
 configs/_current/
+
+# runtime artifacts
+configs/_app-state.json
+configs/*/comm.log

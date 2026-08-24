@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Type: task
 Blocked by: 11
 
@@ -8,14 +8,14 @@ Blocked by: 11
 
 **Blocked by:** 11 (needs ConfigLoader to read protocol.json).
 
-**Status:** ready-for-agent
+**Status:** resolved — `commworkbench/protocol_codec.py`, verify: `tests/test_protocol_codec.py`
 
-- [ ] Compiles protocol.json into per-message `struct.Struct` formats at load time
-- [ ] `encode(message_id, field_dict) -> bytes` — validates all inputs before packing, raises on bad values
-- [ ] `decode(message_id, raw_bytes) -> dict` — returns `{field_name: value}` with enums mapped to labels, bitfields unpacked into named bits
-- [ ] FieldTypeRegistry with dedicated handlers for int, float, enum, bitfield
-- [ ] Bitfield encode/decode via masking/shifting (start_bit, length)
-- [ ] Constraint validation (min, max, step) on encode
-- [ ] Checksum computation and verification (CRC8/16/32, XOR, sum)
-- [ ] Hierarchical byte order (protocol → message → field level)
-- [ ] Verifiable: encode→decode roundtrip for each field type produces identical dict
+- [x] Compiles protocol.json into per-message `struct.Struct` formats at load time
+- [x] `encode(message_id, field_dict) -> bytes` — validates all inputs before packing, raises on bad values
+- [x] `decode(message_id, raw_bytes) -> dict` — returns `{field_name: value}` with enums mapped to labels, bitfields unpacked into named bits
+- [x] FieldTypeRegistry with dedicated handlers for int, float, enum, bitfield
+- [x] Bitfield encode/decode via masking/shifting (start_bit, length)
+- [x] Constraint validation (min, max) on encode — `validate()`. `step` uygulanmadı (hiçbir config kullanmıyor, YAGNI)
+- [x] Checksum computation and verification (CRC8/16/32, XOR, sum)
+- [x] Hierarchical byte order (protocol → message → field level)
+- [x] Verifiable: encode→decode roundtrip for each field type produces identical dict

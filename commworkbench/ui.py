@@ -5,14 +5,12 @@ import queue
 import tempfile
 import tkinter as tk
 from datetime import datetime
-from pathlib import Path
 from tkinter import ttk
 
+from commworkbench.config_loader import CONFIGS_DIR
 from commworkbench.constants import UI_POLL_INTERVAL_MS
 
 log = logging.getLogger(__name__)
-
-_MAX_LOG = 500
 
 
 class CommWorkbenchUI:
@@ -28,8 +26,9 @@ class CommWorkbenchUI:
         traffic_logger=None,
     ):
         self.ui_cfg = configs.get("ui.json", {})
-        self._cfg_path = Path("configs") / project_name / "ui.json"
+        self._cfg_path = CONFIGS_DIR / project_name / "ui.json"
         self._ratios: dict[str, float] = dict(self.ui_cfg.get("panes", {"main_display": 0.5}))
+        self._max_log_entries = self.ui_cfg.get("max_log_entries", 1000)
 
         self._protocol_config = protocol_config or {}
         self._protocol_codec = None
@@ -225,8 +224,7 @@ class CommWorkbenchUI:
 
         self._tree.insert("", "end", values=(now, direction, f"{msg_name} {summary}", raw_hex))
 
-        # SHORTCUT: no rotation config, hardcoded max
-        if len(self._tree.get_children()) > _MAX_LOG:
+        if len(self._tree.get_children()) > self._max_log_entries:
             self._tree.delete(self._tree.get_children()[0])
 
         self._tree.yview_moveto(1.0)

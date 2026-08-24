@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Type: task
 Blocked by: none
 
@@ -8,15 +8,15 @@ Blocked by: none
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** resolved — `commworkbench/config_loader.py`, verify: `verify_config.py`
 
-- [ ] pyproject.toml with project metadata and dependencies (pyserial, crc)
-- [ ] requirements.txt generated from pyproject.toml
-- [ ] .gitignore for Python projects
-- [ ] ConfigLoader reads connection.json, protocol.json, ui.json, tx-state.json from `configs/<project>/`
-- [ ] Auto-discovers project folders in `configs/` (subdirectories containing expected files)
-- [ ] Returns typed dicts for each config file
-- [ ] Missing config file → uses sensible defaults + logs warning
-- [ ] Invalid JSON → skips file, uses defaults, logs error with file path and line number
-- [ ] Schema mismatch → per-field defaults with warnings (preserves valid fields)
-- [ ] Verifiable: run a script that loads configs and prints correct dicts back
+- [x] pyproject.toml with project metadata and dependencies (pyserial, crc)
+- [x] requirements.txt generated from pyproject.toml
+- [x] .gitignore for Python projects
+- [x] ConfigLoader reads connection.json, protocol.json, ui.json, tx-state.json from `configs/<project>/`
+- [x] Auto-discovers project folders in `configs/` (subdirectories containing expected files)
+- [x] Returns typed dicts for each config file
+- [x] Missing config file → uses sensible defaults + logs warning
+- [x] Invalid JSON → skips file, uses defaults, logs error with file path and line number
+- [x] Schema mismatch → per-field defaults with warnings (preserves valid fields)
+- [x] Verifiable: run a script that loads configs and prints correct dicts back

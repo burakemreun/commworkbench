@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Type: spec
 Blocked by: 01, 02, 03, 04, 05, 06, 07, 08, 09
 
