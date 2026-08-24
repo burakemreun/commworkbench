@@ -137,6 +137,105 @@ def test_bytes_and_constant_framing():
     assert frames[0]["fields"] == {"sender_id": 2, "raw": bytes.fromhex("aabbcc")}, frames[0]
 
 
+ADDRESSED = {
+    "protocol": {
+        "name": "PcDsp", "version": "1.0", "endianness": "little",
+        "nodes": {"PC": 1, "DSP": 2, "DSP2": 3},
+        "header": [
+            {"name": "src", "type": "uint8", "role": "src_addr"},
+            {"name": "dst", "type": "uint8", "role": "dst_addr"},
+            {"name": "mid", "type": "uint8", "role": "msg_id"},
+            {"name": "boy", "type": "uint8", "role": "length"},
+        ],
+    },
+    "checksum": {"enabled": False},
+    "messages": {
+        "CitIstek": {"id": 1, "direction": "tx", "src": "PC", "dst": "DSP", "fields": []},
+        "CitCevap": {"id": 2, "direction": "rx", "src": "DSP", "dst": "PC",
+                     "fields": [{"name": "veri", "type": "bytes", "size": 4}]},
+    },
+}
+
+
+def test_addressed_header_wire_format():
+    # the exact bytes the protocol was specified with; a header change that
+    # silently reorders or resizes fields has to fail here
+    codec = ProtocolCodec(ADDRESSED)
+    assert codec.encode("CitIstek", {}) == bytes.fromhex("01020100")
+    assert codec.encode("CitCevap", {"veri": "aabbccdd"}) == bytes.fromhex("02010204aabbccdd")
+
+
+def test_addressed_header_rejects_wrong_sender():
+    # ID 2 is known, but from the wrong node: a header that only matched on the
+    # ID would claim this frame and hand back four bytes of the next one
+    parser = Parser(ADDRESSED)
+    parser.feed(bytes.fromhex("03010204aabbccdd"))
+    frames = parser.get_frames()
+    assert all(f["type"] != "frame" for f in frames), frames
+
+
+def test_addressed_header_length_mismatch_is_an_error():
+    # right addressing, wrong declared length: loud error, then resync onto the
+    # good frame that follows
+    parser = Parser(ADDRESSED)
+    parser.feed(bytes.fromhex("02010209aabbccdd") + bytes.fromhex("02010204 11223344".replace(" ", "")))
+    frames = parser.get_frames()
+    errors = [f for f in frames if f["type"] == "error"]
+    good = [f for f in frames if f["type"] == "frame"]
+    assert len(errors) == 1, frames
+    assert "length" in errors[0]["message"], errors[0]
+    assert len(good) == 1, frames
+    assert good[0]["fields"]["veri"] == bytes.fromhex("11223344"), good[0]
+
+
+def test_addressed_header_resync_after_garbage():
+    codec = ProtocolCodec(ADDRESSED)
+    parser = Parser(ADDRESSED)
+    parser.feed(bytes.fromhex("0202ff") + codec.encode("CitCevap", {"veri": "01020304"}))
+    frames = parser.get_frames()
+    good = [f for f in frames if f["type"] == "frame"]
+    assert len(good) == 1, frames
+    assert good[0]["fields"]["veri"] == bytes.fromhex("01020304")
+
+
+def test_xor_checksum_over_whole_frame():
+    # 1-byte XOR of every byte, header included - what the device actually sends
+    proto = dict(ADDRESSED)
+    proto["checksum"] = {"enabled": True, "algorithm": "xor", "covers": "frame"}
+    codec = ProtocolCodec(proto)
+    encoded = codec.encode("CitCevap", {"veri": "aabbccdd"})
+    expected = 0
+    for b in encoded[:-1]:
+        expected ^= b
+    assert encoded[-1] == expected, encoded.hex()
+    parser = Parser(proto)
+    parser.feed(encoded)
+    assert parser.get_frames()[0]["fields"]["veri"] == bytes.fromhex("aabbccdd")
+
+    corrupt = bytearray(encoded)
+    corrupt[-1] ^= 0xFF
+    parser2 = Parser(proto)
+    parser2.feed(bytes(corrupt))
+    assert any(f["type"] == "error" for f in parser2.get_frames())
+
+
+def test_length_counts_after_self():
+    # some devices count everything that follows the length byte, checksum included
+    proto = dict(ADDRESSED)
+    proto["checksum"] = {"enabled": True, "algorithm": "xor", "covers": "frame"}
+    proto["protocol"] = dict(ADDRESSED["protocol"])
+    proto["protocol"]["header"] = [
+        dict(f, counts="after_self") if f.get("role") == "length" else f
+        for f in ADDRESSED["protocol"]["header"]
+    ]
+    codec = ProtocolCodec(proto)
+    encoded = codec.encode("CitCevap", {"veri": "aabbccdd"})
+    assert encoded[3] == 5, encoded.hex()  # 4 payload + 1 checksum
+    parser = Parser(proto)
+    parser.feed(encoded)
+    assert parser.get_frames()[0]["type"] == "frame"
+
+
 if __name__ == "__main__":
     test_parse_valid_frame()
     test_parse_bad_checksum()
@@ -145,4 +244,10 @@ if __name__ == "__main__":
     test_wide_id_framing()
     test_unknown_id_reported()
     test_bytes_and_constant_framing()
+    test_addressed_header_wire_format()
+    test_addressed_header_rejects_wrong_sender()
+    test_addressed_header_length_mismatch_is_an_error()
+    test_addressed_header_resync_after_garbage()
+    test_xor_checksum_over_whole_frame()
+    test_length_counts_after_self()
     print("all tests passed")

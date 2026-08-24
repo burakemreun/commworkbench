@@ -14,7 +14,14 @@ TYPE_MAP = {
 
 ENDIAN_MAP = {"little": "<", "big": ">"}
 
-ID_TYPE_MAP = {1: "B", 2: "H", 4: "I"}
+ID_TYPE_NAME = {1: "uint8", 2: "uint16", 4: "uint32"}
+
+# header field roles: what the parser reads out of the fixed-size header
+ROLE_MSG_ID = "msg_id"
+ROLE_SRC = "src_addr"
+ROLE_DST = "dst_addr"
+ROLE_LENGTH = "length"
+ROLES = (ROLE_MSG_ID, ROLE_SRC, ROLE_DST, ROLE_LENGTH)
 
 CRC8_VARIANTS = {"ccitt": Crc8.CCITT}
 CRC16_VARIANTS = {
@@ -93,23 +100,107 @@ class ProtocolCodec:
         proto = protocol_config.get("protocol", {})
         self.endianness = proto.get("endianness", "little")
         self.id_size = proto.get("id_size", 1)
-        if self.id_size not in ID_TYPE_MAP:
+        if self.id_size not in ID_TYPE_NAME:
             raise ValueError(f"protocol.id_size must be 1, 2 or 4, got {self.id_size}")
         self.enums = protocol_config.get("enums", {})
         self.messages = protocol_config.get("messages", {})
+        self.nodes = proto.get("nodes", {})
         self._checksum_fn, self._checksum_size, self._checksum_covers = (
             _build_checksum(protocol_config.get("checksum", {}))
         )
+        self._build_header_layout(proto)
+
+    def _build_header_layout(self, proto: dict):
+        # no explicit header: the legacy layout, a bare message ID of id_size bytes
+        self.header = proto.get("header") or [
+            {"name": "msg_id", "type": ID_TYPE_NAME[self.id_size], "role": ROLE_MSG_ID}
+        ]
+        self._role_fields: dict[str, dict] = {}
+        self.header_size = 0
+        self._after_length = 0
+        for field_def in self.header:
+            role = field_def.get("role")
+            if role is not None:
+                if role not in ROLES:
+                    raise ValueError(f"unknown header role: {role!r}")
+                if role in self._role_fields:
+                    raise ValueError(f"duplicate header role: {role!r}")
+                self._role_fields[role] = field_def
+            size = self.field_size(field_def)
+            self.header_size += size
+            if ROLE_LENGTH in self._role_fields and role != ROLE_LENGTH:
+                self._after_length += size
+        if ROLE_MSG_ID not in self._role_fields:
+            raise ValueError("protocol.header must contain a field with role 'msg_id'")
 
     @property
     def checksum_size(self) -> int:
         return self._checksum_size
 
-    def pack_id(self, msg_id: int) -> bytes:
-        return self._pack(msg_id, ID_TYPE_MAP[self.id_size], self.endianness)
+    def node_value(self, node: Any) -> int:
+        """Addresses may be written as a node name from protocol.nodes or as a raw int."""
+        if isinstance(node, str):
+            if node not in self.nodes:
+                raise ValueError(f"unknown node name: {node!r}")
+            return self.nodes[node]
+        return node
 
-    def unpack_id(self, buf: bytes) -> int:
-        return self._unpack(buf[:self.id_size], ID_TYPE_MAP[self.id_size], self.endianness)
+    def _length_value(self, payload_len: int) -> int:
+        field_def = self._role_fields.get(ROLE_LENGTH)
+        if field_def is not None and field_def.get("counts") == "after_self":
+            return self._after_length + payload_len + self._checksum_size
+        return payload_len
+
+    def payload_size(self, msg_def: dict) -> int:
+        return sum(self.field_size(f) for f in msg_def["fields"])
+
+    def build_header(self, msg_def: dict, payload_len: int) -> bytes:
+        out = b""
+        for field_def in self.header:
+            role = field_def.get("role")
+            if role == ROLE_MSG_ID:
+                value = msg_def["id"]
+            elif role == ROLE_SRC:
+                value = self.node_value(msg_def.get("src", 0))
+            elif role == ROLE_DST:
+                value = self.node_value(msg_def.get("dst", 0))
+            elif role == ROLE_LENGTH:
+                value = self._length_value(payload_len)
+            else:
+                value = field_def.get("constant", 0)
+            type_char, _ = _type_info(field_def)
+            out += self._pack(value, type_char, self._field_endian(field_def))
+        return out
+
+    def parse_header(self, buf: bytes) -> dict[str, int]:
+        """Header values keyed by role, or by field name where no role is set."""
+        out = {}
+        offset = 0
+        for field_def in self.header:
+            type_char, size = _type_info(field_def)
+            key = field_def.get("role") or field_def["name"]
+            out[key] = self._unpack(buf[offset:offset + size], type_char,
+                                    self._field_endian(field_def))
+            offset += size
+        return out
+
+    def header_mismatch(self, msg_def: dict, header: dict) -> str | None:
+        """Why this header cannot belong to this message, or None if it can.
+
+        Checks every role the header declares - a known ID alone is a weak match
+        when the same ID travels in both directions.
+        """
+        for role, key in ((ROLE_SRC, "src"), (ROLE_DST, "dst")):
+            if role not in self._role_fields or key not in msg_def:
+                continue
+            expected = self.node_value(msg_def[key])
+            if header.get(role) != expected:
+                return f"{key} mismatch: expected {expected}, got {header.get(role)}"
+        if ROLE_LENGTH in self._role_fields:
+            expected = self._length_value(self.payload_size(msg_def))
+            if header.get(ROLE_LENGTH) != expected:
+                return f"length mismatch: expected {expected}, got {header.get(ROLE_LENGTH)}"
+        return None
 
     @staticmethod
     def field_size(field_def: dict) -> int:
@@ -224,10 +315,10 @@ class ProtocolCodec:
 
     def encode(self, msg_name: str, field_values: dict) -> bytes:
         msg_def = self.messages[msg_name]
-        header = self.pack_id(msg_def["id"])
         payload = b""
         for field_def in msg_def["fields"]:
             payload += self._encode_field(field_def, field_values.get(field_def["name"]), msg_def)
+        header = self.build_header(msg_def, len(payload))
         body = header + payload
         if self._checksum_fn is None:
             return body
@@ -242,10 +333,14 @@ class ProtocolCodec:
 
     def decode(self, msg_name: str, data: bytes) -> dict:
         msg_def = self.messages[msg_name]
-        msg_id = self.unpack_id(data)
+        header = self.parse_header(data)
+        msg_id = header[ROLE_MSG_ID]
         if msg_id != msg_def["id"]:
             raise ValueError(f"message ID mismatch: expected {msg_def['id']}, got {msg_id}")
-        offset = self.id_size
+        mismatch = self.header_mismatch(msg_def, header)
+        if mismatch:
+            raise ValueError(mismatch)
+        offset = self.header_size
         result = {}
         for field_def in msg_def["fields"]:
             val, offset = self._decode_field(field_def, data, offset, msg_def)
@@ -253,9 +348,9 @@ class ProtocolCodec:
         if self._checksum_fn is not None:
             expected = self._unpack(data[offset:], self._checksum_type_char(), self.endianness)
             if self._checksum_covers == "header":
-                region = data[0:self.id_size]
+                region = data[0:self.header_size]
             elif self._checksum_covers == "payload":
-                region = data[self.id_size:offset]
+                region = data[self.header_size:offset]
             else:
                 region = data[0:offset]
             actual = self._checksum_fn(region)

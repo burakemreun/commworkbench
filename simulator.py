@@ -10,7 +10,6 @@ import json
 import logging
 import random
 import socket
-import struct
 import sys
 from pathlib import Path
 
@@ -38,51 +37,46 @@ def find_tx_rx_messages(protocol_config: dict) -> tuple[str | None, str | None]:
     rx_name = None
     for name, msg_def in protocol_config.get("messages", {}).items():
         direction = msg_def.get("direction", "")
-        if direction == "tx":
+        # first pair wins: a config lists its primary request/response first
+        if direction == "tx" and tx_name is None:
             tx_name = name
-        elif direction == "rx":
+        elif direction == "rx" and rx_name is None:
             rx_name = name
     return tx_name, rx_name
 
 
-def calc_field_size(field_def: dict) -> int:
-    ft = field_def["type"]
-    if ft in ("uint8", "int8"):
-        return 1
-    if ft in ("uint16", "int16"):
-        return 2
-    if ft in ("uint32", "int32", "float32"):
-        return 4
-    if ft in ("uint64", "int64", "float64"):
-        return 8
-    if ft == "enum":
-        underlying = field_def.get("enum_underlying", "uint16")
-        return 2 if underlying in ("uint16", "int16") else 1
-    if ft == "bitfield":
-        bits = field_def["bitfield"]["total_bits"]
-        if bits <= 8:
-            return 1
-        if bits <= 16:
-            return 2
-        return 4
-    raise ValueError(f"unknown type: {ft}")
-
-
 def calc_frame_size(codec: ProtocolCodec, msg_name: str) -> int:
     msg_def = codec.messages[msg_name]
-    payload_size = sum(calc_field_size(f) for f in msg_def["fields"])
-    return codec.id_size + payload_size + codec.checksum_size
+    return codec.header_size + codec.payload_size(msg_def) + codec.checksum_size
 
 
-def generate_response(rx_name: str, request_fields: dict) -> dict:
-    device_id = request_fields.get("device_id", 0)
-    return {
-        "device_id": device_id,
-        "temperature": round(random.uniform(18.0, 35.0), 2),
-        "humidity": random.randint(20, 90),
-        "mode": random.choice(["IDLE", "ACTIVE"]),
-        "battery_level": random.randint(10, 100),
-    }
+def generate_value(field_def: dict):
+    ft = field_def["type"]
+    if ft == "bytes":
+        return bytes(random.randrange(256) for _ in range(field_def["size"]))
+    if ft == "bitfield":
+        return {b["name"]: 0 for b in field_def["bitfield"]["bits"]}
+    if ft in ("float32", "float64"):
+        return round(random.uniform(0.0, 100.0), 2)
+    lo = field_def.get("min", 0)
+    hi = field_def.get("max", 100)
+    return random.randint(int(lo), int(hi))
+
+
+def generate_response(codec: ProtocolCodec, rx_name: str, request_fields: dict) -> dict:
+    """Echo back anything the request named, invent the rest from the field type."""
+    values = {}
+    for field_def in codec.messages[rx_name]["fields"]:
+        name = field_def["name"]
+        if name in request_fields:
+            values[name] = request_fields[name]
+        elif field_def["type"] == "enum":
+            enum_def = codec.enums.get(field_def.get("enum_ref", ""), {})
+            names = [v["name"] for v in enum_def.get("values", [])]
+            values[name] = random.choice(names) if names else 0
+        else:
+            values[name] = generate_value(field_def)
+    return values
 
 
 def recv_exact(sock: socket.socket, n: int) -> bytes | None:
@@ -118,7 +112,7 @@ def handle_client(conn: socket.socket, addr: tuple, codec: ProtocolCodec,
                 fields = codec.decode(tx_name, data)
                 log.info("RX %s: %s", tx_name, fields)
 
-                resp_fields = generate_response(rx_name, fields)
+                resp_fields = generate_response(codec, rx_name, fields)
                 log.info("TX %s: %s", rx_name, resp_fields)
 
                 response = codec.encode(rx_name, resp_fields)

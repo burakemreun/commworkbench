@@ -43,6 +43,7 @@ Config-driven binary protocol communication tool — single PyInstaller exe, tki
 - [20 — Canlı E2E Doğrulama](issues/20-live-e2e-verification.md) — resolved, `verify_e2e.py` + `verify_session.py`; 3 bug bulundu (çift TX log, sash restore hiç çalışmıyormuş, proje değişince yeni projenin ui.json'ı eziliyormuş)
 - [21 — Ertelenen İşlerin Kapatılması](issues/21-close-out-deferrals.md) — resolved, split log view + `step` + `protocol.id_size` + append-only log rotation; debt ledger boş
 - [22 — Doküman/Kod Uyuşmazlıkları](issues/22-doc-vs-code-gaps.md) — resolved, byte order hiyerarşisi + `inherit` bug'ı, bilinmeyen ID'ler artık loglanıyor, `bytes` ve `constant` field tipleri
+- [23 — Adresli Header + Bağlantı Çubuğu](issues/23-addressed-header-and-connection-bar.md) — resolved, `protocol.header` role'leri (`msg_id`/`src_addr`/`dst_addr`/`length`) + `protocol.nodes`, parser tüm header'ı doğrulayıp 1 bayt kayarak resync ediyor, `configs/PcDsp/`, UI'da düzenlenebilir Connection çubuğu
 
 ## Ticket'sız gelen iş
 
@@ -55,4 +56,4 @@ Config-driven binary protocol communication tool — single PyInstaller exe, tki
 
 ## Out of scope
 
-<!-- boşaldı — ikisi de #21'de yapıldı -->
+- Aynı mesajın değişken payload boyu (`bytes` alanı için `size_from`). Şu an bir mesajın boyu sabit; `boy` alanların toplamıyla uyuşmazsa error. Gerçekten değişken uzunlukta bir mesaj çıkarsa açılacak (#23).

@@ -12,6 +12,51 @@ from commworkbench.constants import UI_POLL_INTERVAL_MS
 
 log = logging.getLogger(__name__)
 
+# error-label key for the raw send row; not a message name, so it never collides
+RAW_KEY = "__raw__"
+
+
+class _Tooltip:
+    """Hover text for a widget - tkinter ships no tooltip of its own."""
+
+    def __init__(self, widget, text_fn):
+        self._widget = widget
+        self._text_fn = text_fn
+        self._win = None
+        widget.bind("<Enter>", self._show, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+
+    def _show(self, _event=None):
+        text = self._text_fn()
+        if not text or self._win is not None:
+            return
+        self._win = tk.Toplevel(self._widget)
+        self._win.wm_overrideredirect(True)
+        self._win.wm_geometry(
+            f"+{self._widget.winfo_rootx() + 12}"
+            f"+{self._widget.winfo_rooty() + self._widget.winfo_height() + 4}"
+        )
+        tk.Label(
+            self._win, text=text, justify="left", bg="#ffffe0",
+            relief="solid", bd=1, padx=5, pady=3,
+        ).pack()
+
+    def _hide(self, _event=None):
+        if self._win is not None:
+            self._win.destroy()
+            self._win = None
+
+
+def _save_json_atomic(path, data: dict, what: str):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, path)
+    except OSError as e:
+        log.error("failed to save %s: %s", what, e)
+
 
 def _fmt_value(val) -> str:
     if isinstance(val, (bytes, bytearray)):
@@ -35,6 +80,11 @@ class CommWorkbenchUI:
         self._cfg_path = CONFIGS_DIR / project_name / "ui.json"
         self._ratios: dict[str, float] = dict(self.ui_cfg.get("panes", {"main_display": 0.5}))
         self._max_log_entries = self.ui_cfg.get("max_log_entries", 1000)
+
+        self._conn_cfg = configs.get("connection.json", {})
+        self._conn_path = CONFIGS_DIR / project_name / "connection.json"
+        self._conn_requested = connection_manager is not None
+        self._port_info: dict[str, str] = {}
 
         self._protocol_config = protocol_config or {}
         self._protocol_codec = None
@@ -61,6 +111,7 @@ class CommWorkbenchUI:
         sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
         self.root.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
 
+        self._build_connection_bar()
         self._build_status_bar()
         self._build_send_area()
         self._build_panes()
@@ -70,9 +121,174 @@ class CommWorkbenchUI:
 
     def set_connection_manager(self, conn_mgr):
         self._conn_mgr = conn_mgr
+        self._conn_requested = conn_mgr is not None
+        self._refresh_connect_button()
+
+    def apply_connection_config(self, conn_cfg: dict, project_name: str):
+        """Adopt another project's connection.json - the bar edits that project's
+        settings from then on, and saves back into its own file."""
+        self._conn_cfg = conn_cfg
+        self._conn_path = CONFIGS_DIR / project_name / "connection.json"
+        self._load_conn_fields()
 
     def set_protocol_codec(self, codec):
         self._protocol_codec = codec
+
+
+    # ---- connection bar -------------------------------------------------
+
+    def _build_connection_bar(self):
+        box = ttk.LabelFrame(self.root, text="Connection")
+        box.pack(fill="x", side="top", padx=4, pady=(4, 0))
+
+        self._connect_btn = ttk.Button(box, text="Connect", command=self._on_connect_click)
+        self._connect_btn.pack(side="right", padx=6, pady=4)
+
+        row = tk.Frame(box)
+        row.pack(side="left", fill="x", padx=4, pady=4)
+
+        self._type_var = tk.StringVar()
+        tk.Label(row, text="Type:").pack(side="left")
+        type_combo = ttk.Combobox(
+            row, textvariable=self._type_var, state="readonly", width=7,
+            values=("tcp", "serial"),
+        )
+        type_combo.pack(side="left", padx=(2, 10))
+        type_combo.bind("<<ComboboxSelected>>", lambda e: self._show_type_fields())
+
+        self._tcp_frame = tk.Frame(row)
+        self._host_var = tk.StringVar()
+        tk.Label(self._tcp_frame, text="Host:").pack(side="left")
+        tk.Entry(self._tcp_frame, textvariable=self._host_var, width=15).pack(side="left", padx=(2, 10))
+        self._tcp_port_var = tk.StringVar()
+        tk.Label(self._tcp_frame, text="Port:").pack(side="left")
+        tk.Entry(self._tcp_frame, textvariable=self._tcp_port_var, width=7).pack(side="left", padx=(2, 10))
+        self._mode_var = tk.StringVar()
+        tk.Label(self._tcp_frame, text="Mode:").pack(side="left")
+        ttk.Combobox(
+            self._tcp_frame, textvariable=self._mode_var, state="readonly", width=8,
+            values=("client", "server"),
+        ).pack(side="left", padx=2)
+
+        self._serial_frame = tk.Frame(row)
+        self._com_var = tk.StringVar()
+        tk.Label(self._serial_frame, text="Port:").pack(side="left")
+        # editable on purpose: a port the scan cannot see (driver not up yet, a
+        # remote/virtual port) still has to be typeable
+        self._com_combo = ttk.Combobox(
+            self._serial_frame, textvariable=self._com_var, width=12,
+            postcommand=self._refresh_ports,
+        )
+        self._com_combo.pack(side="left", padx=(2, 10))
+        _Tooltip(self._com_combo, self._port_tooltip)
+        self._refresh_ports()
+        self._baud_var = tk.StringVar()
+        tk.Label(self._serial_frame, text="Baud:").pack(side="left")
+        # not readonly: the list is a shortcut, any rate can be typed in
+        self._baud_combo = ttk.Combobox(
+            self._serial_frame, textvariable=self._baud_var, width=9,
+            values=("9600", "19200", "38400", "57600", "115200", "230400", "460800", "921600"),
+        )
+        self._baud_combo.pack(side="left", padx=2)
+
+        self._load_conn_fields()
+
+    def _scan_serial_ports(self) -> dict[str, str]:
+        """Port name -> what is behind it. Empty when pyserial is not installed."""
+        try:
+            from serial.tools import list_ports
+        except ImportError:
+            log.warning("pyserial not installed - serial ports cannot be listed")
+            return {}
+        try:
+            ports = list_ports.comports()
+        except OSError as e:
+            log.warning("serial port scan failed: %s", e)
+            return {}
+        found = {}
+        for port in ports:
+            detail = [port.description or port.device]
+            if port.manufacturer:
+                detail.append(port.manufacturer)
+            if port.hwid:
+                detail.append(port.hwid)
+            found[port.device] = "\n".join(detail)
+        return found
+
+    def _refresh_ports(self):
+        # rescanned every time the list drops down, so hot-plugged adapters show up
+        self._port_info = self._scan_serial_ports()
+        self._com_combo["values"] = tuple(self._port_info)
+
+    def _port_tooltip(self) -> str:
+        selected = self._com_var.get().strip()
+        if selected in self._port_info:
+            return f"{selected}\n{self._port_info[selected]}"
+        if not self._port_info:
+            return "No serial ports detected on this PC"
+        return f"{selected or '(empty)'} - not detected on this PC"
+
+    def _load_conn_fields(self):
+        mode = self._conn_cfg.get("mode", "tcp_client")
+        tcp = self._conn_cfg.get("tcp", {})
+        serial = self._conn_cfg.get("serial", {})
+        self._type_var.set("serial" if mode == "serial" else "tcp")
+        self._mode_var.set("server" if mode == "tcp_server" else "client")
+        self._host_var.set(str(tcp.get("host", "127.0.0.1")))
+        self._tcp_port_var.set(str(tcp.get("port", 8080)))
+        self._com_var.set(str(serial.get("port", "COM1")))
+        self._baud_var.set(str(serial.get("baud_rate", 115200)))
+        self._show_type_fields()
+        self._refresh_connect_button()
+
+    def _show_type_fields(self):
+        serial = self._type_var.get() == "serial"
+        self._tcp_frame.pack_forget()
+        self._serial_frame.pack_forget()
+        (self._serial_frame if serial else self._tcp_frame).pack(side="left")
+
+    def _refresh_connect_button(self):
+        self._connect_btn.config(text="Disconnect" if self._conn_requested else "Connect")
+
+    def _apply_conn_fields(self) -> str | None:
+        """Push the bar into the live connection config. Returns an error to show."""
+        if self._type_var.get() == "serial":
+            try:
+                baud = int(self._baud_var.get())
+            except ValueError:
+                return f"Invalid baud rate: {self._baud_var.get()!r}"
+            self._conn_cfg["mode"] = "serial"
+            self._conn_cfg.setdefault("serial", {}).update(
+                {"port": self._com_var.get().strip(), "baud_rate": baud}
+            )
+            return None
+        try:
+            port = int(self._tcp_port_var.get())
+        except ValueError:
+            return f"Invalid port: {self._tcp_port_var.get()!r}"
+        self._conn_cfg["mode"] = (
+            "tcp_server" if self._mode_var.get() == "server" else "tcp_client"
+        )
+        self._conn_cfg.setdefault("tcp", {}).update(
+            {"host": self._host_var.get().strip(), "port": port}
+        )
+        return None
+
+    def _on_connect_click(self):
+        if self._conn_mgr is None:
+            self.update_status("No connection manager — open a project first")
+            return
+        if self._conn_requested:
+            self._conn_mgr.disconnect()
+            self._conn_requested = False
+        else:
+            error = self._apply_conn_fields()
+            if error:
+                self.update_status(error)
+                return
+            self._conn_mgr.connect()
+            self._conn_requested = True
+        self._refresh_connect_button()
 
     def _build_status_bar(self):
         bar = tk.Frame(self.root, relief="sunken", bd=1)
@@ -331,11 +547,56 @@ class CommWorkbenchUI:
         self._send_inner.bind("<Enter>", lambda e: self._bind_mousewheel(canvas))
         self._send_inner.bind("<Leave>", lambda e: self._unbind_mousewheel(canvas))
 
+        self._build_raw_form()
+
         messages = self._protocol_config.get("messages", {})
         for msg_name, msg_def in messages.items():
             if msg_def.get("direction", "tx") != "tx":
                 continue
             self._build_message_form(msg_name, msg_def)
+
+    def _build_raw_form(self):
+        frame = tk.LabelFrame(self._send_inner, text="Raw Bytes", padx=4, pady=4)
+        frame.pack(fill="x", padx=4, pady=2)
+
+        tk.Label(frame, text="hex:", anchor="e", padx=4).grid(row=0, column=0, sticky="e")
+        self._raw_entry = tk.Entry(frame, width=48)
+        self._raw_entry.grid(row=0, column=1, sticky="w", padx=2, pady=1)
+        self._raw_entry.bind("<Return>", lambda e: self._send_raw())
+        tk.Button(frame, text="Send", command=self._send_raw).grid(
+            row=0, column=2, sticky="w", padx=4
+        )
+
+        err_label = tk.Label(frame, text="", fg="red", anchor="w")
+        err_label.grid(row=1, column=0, columnspan=3, sticky="w", padx=4)
+        self._send_errors[RAW_KEY] = err_label
+
+    def _send_raw(self):
+        self._clear_send_error(RAW_KEY)
+        text = self._raw_entry.get().strip()
+        if not text:
+            return
+        # accept what people actually paste: "01 02", "0102", "0x01,0x02"
+        cleaned = text.replace("0x", "").replace(",", " ").replace("-", " ").replace(" ", "")
+        try:
+            data = bytes.fromhex(cleaned)
+        except ValueError as e:
+            self._show_send_error(RAW_KEY, f"Not hex: {e}")
+            return
+
+        if self._queue is not None:
+            self._queue.put({
+                "type": "frame",
+                "msg_name": "[RAW]",
+                "fields": {},
+                "raw_hex": data.hex(" "),
+                "direction": "tx",
+            })
+
+        if self._conn_mgr and self._conn_mgr.is_connected():
+            self._conn_mgr.send(data)
+        else:
+            self._show_send_error(RAW_KEY, "Not connected")
 
     def _bind_mousewheel(self, canvas):
         canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
@@ -544,14 +805,14 @@ class CommWorkbenchUI:
         w, h = self.root.winfo_width(), self.root.winfo_height()
         self.ui_cfg["geometry"] = {"width": w, "height": h}
 
-        self._cfg_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            fd, tmp = tempfile.mkstemp(dir=self._cfg_path.parent, suffix=".tmp")
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(self.ui_cfg, f, indent=2)
-            os.replace(tmp, self._cfg_path)
-        except OSError as e:
-            log.error("failed to save layout: %s", e)
+        _save_json_atomic(self._cfg_path, self.ui_cfg, "layout")
+
+    def _save_connection(self):
+        # the bar edits the live config dict, so what is in memory is what to write
+        if not self._conn_cfg:
+            return
+        self._apply_conn_fields()
+        _save_json_atomic(self._conn_path, self._conn_cfg, "connection settings")
 
     def _on_close(self):
         self.cancel_all_periodic()
@@ -561,6 +822,7 @@ class CommWorkbenchUI:
         if self._close_callback:
             self._close_callback("close")
         self._save_layout()
+        self._save_connection()
         self.root.destroy()
 
     def update_status(self, text: str, connected: bool = False):

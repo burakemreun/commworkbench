@@ -23,7 +23,7 @@ from main import App  # noqa: E402
 
 PROJECT = "Test1"
 PROJ_DIR = CONFIGS_DIR / PROJECT
-TOUCHED = ("ui.json", "tx-state.json", "comm.log")
+TOUCHED = ("ui.json", "tx-state.json", "comm.log", "connection.json")
 OTHER = "ZZTemp"
 OTHER_DIR = CONFIGS_DIR / OTHER
 
@@ -232,12 +232,104 @@ def part_c():
     close_app(app2)
 
 
+
+def part_d():
+    print("\nPart D -- connection bar")
+    # seed a known connection.json: this part asserts on the values it loads, so
+    # it must not depend on whatever the last live session left behind
+    (PROJ_DIR / "connection.json").write_text(json.dumps({
+        "mode": "tcp_client",
+        "tcp": {"host": "127.0.0.1", "port": 8080, "retry_interval_ms": 3000},
+        "serial": {"port": "COM1", "baud_rate": 115200},
+    }, indent=2), encoding="utf-8")
+
+    app = build_app(PROJECT)
+    ui = app._ui
+    root = ui.root
+
+    # the bar must open on what connection.json already says
+    assert ui._type_var.get() == "tcp", ui._type_var.get()
+    assert ui._host_var.get() == "127.0.0.1", ui._host_var.get()
+    assert ui._tcp_port_var.get() == "8080", ui._tcp_port_var.get()
+    assert ui._mode_var.get() == "client", ui._mode_var.get()
+    # the app auto-connects at startup, so the button offers the opposite action
+    assert ui._connect_btn.cget("text") == "Disconnect", ui._connect_btn.cget("text")
+    print("  fields loaded from connection.json: OK")
+
+    ui._on_connect_click()
+    pump(root, 0.3)
+    assert ui._connect_btn.cget("text") == "Connect", ui._connect_btn.cget("text")
+    ui._on_connect_click()
+    pump(root, 0.3)
+    assert ui._connect_btn.cget("text") == "Disconnect", ui._connect_btn.cget("text")
+    print("  connect/disconnect toggle: OK")
+
+    # a typo in the port must not reach the connection manager or the file
+    ui._on_connect_click()
+    ui._tcp_port_var.set("nope")
+    ui._on_connect_click()
+    pump(root, 0.2)
+    assert ui._connect_btn.cget("text") == "Connect", "bad port must not connect"
+    assert app._configs["connection.json"]["tcp"]["port"] == 8080
+    print("  invalid port rejected: OK")
+
+    ui._tcp_port_var.set("9100")
+    ui._host_var.set("10.0.0.5")
+    ui._type_var.set("serial")
+    ui._show_type_fields()
+    # the port box scans the machine but stays typeable
+    assert ui._com_combo.cget("state") != "readonly", ui._com_combo.cget("state")
+    ui._refresh_ports()
+    assert isinstance(ui._com_combo.cget("values"), (tuple, str)), ui._com_combo.cget("values")
+    assert set(ui._port_info) == set(ui._com_combo["values"]), ui._port_info
+    ui._com_var.set("COM_NOPE")
+    assert "not detected" in ui._port_tooltip() or "No serial ports" in ui._port_tooltip(),         ui._port_tooltip()
+    real_ports = dict(ui._port_info)
+    # the detail branch has to be checked even on a machine with no COM ports
+    ui._port_info = dict(real_ports)
+    ui._port_info["COM_FAKE"] = "USB Serial Device' + BS + 'nFTDI' + BS + 'nUSB VID:PID=0403:6001"
+    ui._com_var.set("COM_FAKE")
+    tip = ui._port_tooltip()
+    assert tip.startswith("COM_FAKE"), tip
+    assert "FTDI" in tip and "VID:PID" in tip, tip
+    ui._port_info = real_ports
+    print(f"  port scan + tooltip: OK ({len(real_ports)} real port(s): {list(real_ports)})")
+
+    ui._com_var.set("COM7")
+    # the baud box is editable on purpose: a rate outside the dropdown list must
+    # still survive to the config
+    assert ui._baud_combo.cget("state") != "readonly", ui._baud_combo.cget("state")
+    ui._baud_var.set("500000")
+    assert ui._apply_conn_fields() is None
+    assert app._configs["connection.json"]["serial"]["baud_rate"] == 500000
+    ui._baud_var.set("57600")
+    pump(root, 0.2)
+    close_app(app)
+
+    saved = read_json(PROJ_DIR / "connection.json")
+    assert saved["mode"] == "serial", saved
+    assert saved["serial"]["port"] == "COM7", saved
+    assert saved["serial"]["baud_rate"] == 57600, saved
+    # switching type must not throw away the tcp settings that were typed in
+    assert saved["tcp"]["host"] == "127.0.0.1", saved
+    print("  hand-typed baud accepted + edits saved to connection.json: OK")
+
+    app2 = build_app(PROJECT)
+    ui2 = app2._ui
+    assert ui2._type_var.get() == "serial", ui2._type_var.get()
+    assert ui2._com_var.get() == "COM7", ui2._com_var.get()
+    assert ui2._baud_var.get() == "57600", ui2._baud_var.get()
+    close_app(app2)
+    print("  restored on reopen: OK")
+
+
 def main():
     backup = {f: (PROJ_DIR / f).read_bytes() for f in TOUCHED if (PROJ_DIR / f).exists()}
     try:
         part_a()
         part_b()
         part_c()
+        part_d()
         print("\nSession checks OK.")
     finally:
         for f, data in backup.items():

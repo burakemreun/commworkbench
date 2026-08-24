@@ -1,0 +1,63 @@
+{
+  "protocol": {
+    "name": "PcDsp",
+    "version": "1.0",
+    "endianness": "little",
+    "nodes": {
+      "PC": 1,
+      "DSP": 2
+    },
+    "header": [
+      {"name": "gonderen_id", "type": "uint8", "role": "src_addr"},
+      {"name": "alan_id", "type": "uint8", "role": "dst_addr"},
+      {"name": "mesaj_id", "type": "uint8", "role": "msg_id"},
+      {"name": "boy", "type": "uint8", "role": "length", "counts": "payload"}
+    ]
+  },
+  "checksum": {
+    "enabled": false,
+    "algorithm": "xor",
+    "covers": "frame"
+  },
+  "messages": {
+    "CitIstek": {
+      "id": 1,
+      "name": "CIT Istek",
+      "direction": "tx",
+      "src": "PC",
+      "dst": "DSP",
+      "fields": []
+    },
+    "CitCevap": {
+      "id": 2,
+      "name": "CIT Cevap",
+      "direction": "rx",
+      "src": "DSP",
+      "dst": "PC",
+      "fields": [
+        {"name": "cit_verisi", "type": "bytes", "size": 4}
+      ]
+    },
+    "ParamOku": {
+      "id": 3,
+      "name": "Parametre Oku",
+      "direction": "tx",
+      "src": "PC",
+      "dst": "DSP",
+      "fields": [
+        {"name": "param_id", "type": "uint16"}
+      ]
+    },
+    "ParamCevap": {
+      "id": 4,
+      "name": "Parametre Cevap",
+      "direction": "rx",
+      "src": "DSP",
+      "dst": "PC",
+      "fields": [
+        {"name": "param_id", "type": "uint16"},
+        {"name": "deger", "type": "float32"}
+      ]
+    }
+  }
+}

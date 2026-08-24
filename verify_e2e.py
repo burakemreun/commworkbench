@@ -8,6 +8,7 @@ and comm.log. Also exercises periodic send start/stop.
 Run from the repo root: python verify_e2e.py
 """
 
+import json
 import socket
 import subprocess
 import sys
@@ -21,7 +22,7 @@ from main import App  # noqa: E402
 
 PROJECT = "Test1"
 PROJ_DIR = CONFIGS_DIR / PROJECT
-TOUCHED = ("ui.json", "tx-state.json", "comm.log")
+TOUCHED = ("ui.json", "tx-state.json", "comm.log", "connection.json")
 TX_MSG = "QuerySensor"
 RX_MSG = "SensorResponse"
 DEVICE_ID = "7"
@@ -80,6 +81,13 @@ def main():
     log_path = PROJ_DIR / "comm.log"
     if log_path.exists():
         log_path.unlink()
+    # this check talks TCP to the simulator; whatever the last live session left
+    # in connection.json must not decide that
+    (PROJ_DIR / "connection.json").write_text(json.dumps({
+        "mode": "tcp_client",
+        "tcp": {"host": "127.0.0.1", "port": 8080, "retry_interval_ms": 500},
+        "serial": {"port": "COM1", "baud_rate": 115200},
+    }, indent=2), encoding="utf-8")
 
     sim = subprocess.Popen(
         [sys.executable, "simulator.py", str(PROJ_DIR)],
@@ -140,6 +148,26 @@ def main():
         assert unknown[3] == "abcd", unknown
         assert "[UNKNOWN]" in log_path.read_text(encoding="utf-8"), "unknown traffic missing from comm.log"
         print("  unknown IDs surfaced (log + comm.log): OK")
+
+        # raw bytes: typed by hand, no message form involved, straight to the wire
+        ui._raw_entry.delete(0, "end")
+        ui._raw_entry.insert(0, "zz zz")
+        ui._send_raw()
+        assert "Not hex" in ui._send_errors["__raw__"].cget("text"),             ui._send_errors["__raw__"].cget("text")
+
+        raw_hex = app._codec.encode(TX_MSG, {"device_id": 9}).hex(" ")
+        rx_before = len(rows(ui, "RX"))
+        ui._raw_entry.delete(0, "end")
+        ui._raw_entry.insert(0, raw_hex)
+        ui._send_raw()
+        assert ui._send_errors["__raw__"].cget("text") == "", ui._send_errors["__raw__"].cget("text")
+        assert pump_until(root, lambda: len(rows(ui, "RX")) > rx_before, 5),             "device did not answer the hand-typed frame"
+        pump(root, 0.3)
+        raw_row = [r for r in rows(ui, "TX") if "[RAW]" in r[2]]
+        assert len(raw_row) == 1, raw_row
+        assert raw_row[0][3] == raw_hex, raw_row[0]
+        assert "[RAW]" in log_path.read_text(encoding="utf-8"), "raw send missing from comm.log"
+        print(f"  raw byte send (bad hex rejected, {raw_hex} answered): OK")
 
         info = ui._periodic[TX_MSG]
         info["interval_entry"].delete(0, "end")

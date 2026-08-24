@@ -65,6 +65,10 @@ def test_bitfield():
     codec = ProtocolCodec(proto)
     values = {"flags": {"enable": 1, "mode": 5, "count": 10}}
     encoded = codec.encode("Flags", values)
+    # packing is LSB-first and the docs say so: enable on bit 0, mode on 1-3,
+    # count on 4-7 -> 1 | (5 << 1) | (10 << 4) = 0xAB. A round-trip alone would
+    # pass under any bit order.
+    assert encoded == bytes([10, 0xAB]), encoded.hex()
     decoded = codec.decode("Flags", encoded)
     assert decoded["flags"]["enable"] == 1
     assert decoded["flags"]["mode"] == 5

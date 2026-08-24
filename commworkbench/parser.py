@@ -2,7 +2,7 @@ import logging
 import time
 
 from commworkbench.constants import FRAME_TIMEOUT_SECS, RING_BUFFER_SIZE
-from commworkbench.protocol_codec import ProtocolCodec
+from commworkbench.protocol_codec import ROLE_MSG_ID, ProtocolCodec
 
 log = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ class Parser:
     def __init__(self, protocol_config: dict):
         self._codec = ProtocolCodec(protocol_config)
         self._checksum_size = self._codec.checksum_size
-        self._id_size = self._codec.id_size
+        self._header_size = self._codec.header_size
         self._buf = bytearray(RING_BUFFER_SIZE)
         self._write_ptr = 0
         self._read_ptr = 0
@@ -24,16 +24,19 @@ class Parser:
         self._frame_start = 0
         self._msg_name: str | None = None
         self._msg_def: dict | None = None
+        self._header_bytes = b""
         self._payload_buf = bytearray()
         self._skipped = bytearray()
         self._checksum_buf = bytearray()
         self._output: list[dict] = []
         self._last_feed_time = time.time()
 
-        self._id_to_msg: dict[int, tuple[str, dict]] = {}
+        # one ID can belong to several messages once addressing is in play
+        # (same command to two nodes), so candidates are kept as a list
+        self._id_to_msg: dict[int, list[tuple[str, dict]]] = {}
         for name, msg_def in protocol_config.get("messages", {}).items():
             if msg_def.get("direction", "rx") == "rx":
-                self._id_to_msg[msg_def["id"]] = (name, msg_def)
+                self._id_to_msg.setdefault(msg_def["id"], []).append((name, msg_def))
 
     def feed(self, data: bytes):
         now = time.time()
@@ -87,32 +90,25 @@ class Parser:
         self._state = SCAN
         self._msg_name = None
         self._msg_def = None
+        self._header_bytes = b""
         self._payload_buf.clear()
         self._checksum_buf.clear()
 
     def _payload_size(self) -> int:
-        return sum(self._codec.field_size(f) for f in self._msg_def["fields"])
+        return self._codec.payload_size(self._msg_def)
 
     def _process(self):
         while True:
             avail = self._available()
 
             if self._state == SCAN:
-                peek = self._peek_bytes(self._id_size)
+                peek = self._peek_bytes(self._header_size)
                 if peek is None:
                     self._flush_skipped()
                     break
-                msg_id = self._codec.unpack_id(peek)
-                if msg_id in self._id_to_msg:
-                    self._flush_skipped()
-                    self._frame_start = self._read_ptr
-                    self._read_ptr = (self._read_ptr + self._id_size) % RING_BUFFER_SIZE
-                    self._msg_name, self._msg_def = self._id_to_msg[msg_id]
-                    self._payload_buf.clear()
-                    self._state = HEADER
-                else:
-                    # not a known ID here: resync one byte at a time, keeping the
-                    # bytes so the traffic log can show what came in
+                if not self._try_header(peek):
+                    # header does not hold here: resync one byte at a time, keeping
+                    # the bytes so the traffic log can show what came in
                     self._skipped.append(self._read_byte())
 
             elif self._state == HEADER:
@@ -159,9 +155,44 @@ class Parser:
         })
         self._skipped.clear()
 
+    def _try_header(self, peek: bytes) -> bool:
+        """Accept the header at the read pointer, or report that it does not hold.
+
+        A known message ID is not enough on its own: the same ID travels in both
+        directions, so every role the header declares (sender, receiver, length)
+        has to agree with the message before the frame is claimed.
+        """
+        header = self._codec.parse_header(peek)
+        length_error = None
+        for msg_name, msg_def in self._id_to_msg.get(header[ROLE_MSG_ID], ()):
+            mismatch = self._codec.header_mismatch(msg_def, header)
+            if mismatch is None:
+                self._flush_skipped()
+                self._frame_start = self._read_ptr
+                self._header_bytes = peek
+                self._read_ptr = (self._read_ptr + self._header_size) % RING_BUFFER_SIZE
+                self._msg_name, self._msg_def = msg_name, msg_def
+                self._payload_buf.clear()
+                self._state = HEADER
+                return True
+            if "length" in mismatch and length_error is None:
+                length_error = f"{msg_name}: {mismatch}"
+
+        # addressing matched a known message but the declared length did not: that
+        # is a real protocol error, not line noise - surface it, then resync
+        if length_error is not None:
+            self._flush_skipped()
+            self._output.append({
+                "type": "error",
+                "message": length_error,
+                "raw_hex": peek.hex(),
+            })
+            self._skipped.append(self._read_byte())
+            return True
+        return False
+
     def _decode_and_emit(self):
-        id_bytes = self._codec.pack_id(self._msg_def["id"])
-        frame_data = id_bytes + bytes(self._payload_buf) + bytes(self._checksum_buf)
+        frame_data = self._header_bytes + bytes(self._payload_buf) + bytes(self._checksum_buf)
 
         try:
             fields = self._codec.decode(self._msg_name, frame_data)
@@ -184,5 +215,6 @@ class Parser:
         self._state = SCAN
         self._msg_name = None
         self._msg_def = None
+        self._header_bytes = b""
         self._payload_buf.clear()
         self._checksum_buf.clear()

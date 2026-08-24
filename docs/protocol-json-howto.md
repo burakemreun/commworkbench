@@ -7,14 +7,18 @@ This document defines the JSON format used to describe binary communication prot
 ## Overview
 
 A `protocol.json` describes:
-1. **Protocol metadata** — name, version, byte order
+1. **Protocol metadata** — name, version, byte order, header layout
 2. **Enums** — named integer constants (optional)
 3. **Messages** — frame definitions with ordered fields
 4. **Checksum** — frame integrity check (optional)
 
 ```
-Wire format: [1-byte msg ID] [payload fields...] [checksum bytes]
+Wire format: [header] [payload fields...] [checksum bytes]
 ```
+
+The header defaults to a bare message ID (`protocol.id_size` bytes). Protocols that
+address a sender and a receiver, or that carry a payload length, describe the header
+explicitly with `protocol.header` — see below.
 
 ---
 
@@ -48,7 +52,58 @@ Wire format: [1-byte msg ID] [payload fields...] [checksum bytes]
 | `name` | string | yes | Protocol identifier |
 | `version` | string | yes | Version string |
 | `endianness` | `"little"` or `"big"` | yes | Global byte order. Overridable per-field. |
-| `id_size` | `1`, `2` or `4` | no | Message ID width in bytes (default `1`, i.e. max 256 messages). Written in the global byte order. |
+| `id_size` | `1`, `2` or `4` | no | Message ID width in bytes (default `1`, i.e. max 256 messages). Written in the global byte order. Ignored when `header` is given. |
+| `nodes` | object | no | Node name → address value, e.g. `{"PC": 1, "DSP": 2}`. Message `src`/`dst` may then use the names. |
+| `header` | array | no | Explicit header layout (see below). Default: a single `msg_id` field of `id_size` bytes. |
+
+### `protocol.header`
+
+An ordered list of fixed-size fields that precede the payload on every frame. Each entry
+is a normal field definition (`name`, `type`, optional `endianness`, `constant`) plus an
+optional `role` telling the parser what the field means:
+
+| `role` | Meaning |
+|--------|---------|
+| `msg_id` | Message type ID. **Required — exactly one header field must carry it.** |
+| `src_addr` | Sender address. Matched against the message's `src`. |
+| `dst_addr` | Receiver address. Matched against the message's `dst`. |
+| `length` | Payload length. Written automatically on encode, verified on decode. |
+| *(none)* | A plain header byte, e.g. a sync marker. Use `constant` to fix its value. |
+
+A `length` field takes an optional `counts`:
+
+| `counts` | Counts |
+|----------|--------|
+| `"payload"` (default) | Payload bytes only. |
+| `"after_self"` | Every byte after the length field: remaining header bytes + payload + checksum. |
+
+```json
+{
+  "protocol": {
+    "name": "PcDsp",
+    "version": "1.0",
+    "endianness": "little",
+    "nodes": {"PC": 1, "DSP": 2},
+    "header": [
+      {"name": "gonderen_id", "type": "uint8", "role": "src_addr"},
+      {"name": "alan_id",     "type": "uint8", "role": "dst_addr"},
+      {"name": "mesaj_id",    "type": "uint8", "role": "msg_id"},
+      {"name": "boy",         "type": "uint8", "role": "length"}
+    ]
+  }
+}
+```
+
+**How the parser uses it.** It slides one byte at a time and accepts a header only when
+*every* declared role agrees with a known message: the ID is known, `src_addr`/`dst_addr`
+match that message's `src`/`dst`, and `length` equals the message's payload size. A known
+ID alone is not enough — the same ID travels in both directions.
+
+- Any role disagreeing except `length` → not a header here; shift one byte and keep
+  scanning. The skipped bytes still reach the traffic log as an `unknown` entry.
+- `length` disagreeing while the addressing matched → an **error** entry is logged (a
+  recognised message with the wrong length is a protocol fault, not line noise), then the
+  scan shifts one byte and resyncs.
 
 ---
 
@@ -100,9 +155,11 @@ Keyed by a PascalCase identifier (used as internal key). Each message defines on
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `id` | integer | yes | Message type ID in the wire header. Must fit `protocol.id_size` bytes (0-255 by default) |
+| `id` | integer | yes | Message type ID in the wire header. Must fit the `msg_id` header field — `protocol.id_size` bytes by default (0-255), otherwise the width of that field's type |
 | `name` | string | yes | Human-readable display name |
 | `direction` | `"tx"` or `"rx"` | no | `tx` = sent by app, `rx` = received from device |
+| `src` | string or int | no | Sender address, written into the `src_addr` header field. A `protocol.nodes` name or a raw value. |
+| `dst` | string or int | no | Receiver address, written into the `dst_addr` header field. A `protocol.nodes` name or a raw value. |
 | `endianness` | `"little"`, `"big"`, or `"inherit"` | no | Byte order for this message (default: inherit from `protocol`) |
 | `description` | string | no | Optional description |
 | `fields` | array | yes | Ordered field definitions (see below) |
@@ -218,8 +275,7 @@ Packs multiple small values into a single integer container.
 
 | Bitfield Property | Type | Required | Description |
 |-------------------|------|----------|-------------|
-| `total_bits` | `8`, `16`, or `32` | no | Container size. Default: auto-calculate from bits sum. |
-| `bit_order` | `"msb"` or `"lsb"` | no | Bit packing order. Default: `"msb"`. |
+| `total_bits` | `8`, `16`, or `32` | yes | Container size. Not auto-calculated — omitting it is an error. |
 | `bits` | array | yes | Array of bit entries |
 
 Each bit entry:
@@ -231,7 +287,9 @@ Each bit entry:
 | `enum_ref` | string | no | Optional enum for named values |
 | `description` | string | no | Optional description |
 
-Bits are packed sequentially. Offsets auto-calculate from order.
+Bits are packed sequentially from the least significant bit up: the first entry lands on
+bit 0, the next above it, and so on. Offsets auto-calculate from order, and the packing
+order is not configurable.
 
 ---
 
@@ -255,8 +313,11 @@ Adds a checksum to each frame for integrity verification.
 | `enabled` | boolean | yes | Enable/disable checksum |
 | `algorithm` | string | yes | `"crc8"`, `"crc16"`, `"crc32"`, `"xor"`, `"sum"` |
 | `crc_variant` | string | no | CRC variant (e.g. `"modbus"`, `"ccitt"`, `"xmodem"`, `"dnp"`) |
-| `covers` | string | no | What the checksum covers: `"header"`, `"payload"`, `"header_and_payload"` |
-| `offset` | integer | no | Byte offset where checksum starts (null = appended at end) |
+| `covers` | string | no | What the checksum covers: `"header"` (header bytes only), `"payload"` (payload only), or anything else — `"frame"`, `"header_and_payload"` — for the whole frame. Default `"payload"`. |
+
+The checksum is always appended at the end of the frame; there is no way to place it
+elsewhere.
+
 
 CRC variants by algorithm:
 
@@ -417,19 +478,59 @@ A simple query-response protocol:
 
 ---
 
+### Example 4: Addressed Header (PC ↔ DSP)
+
+Header is `[sender][receiver][msg id][payload length]`, no checksum. PC asks, DSP answers.
+On the wire: `01 02 01 00` out, `02 01 02 04 aa bb cc dd` back.
+
+```json
+{
+  "protocol": {
+    "name": "PcDsp",
+    "version": "1.0",
+    "endianness": "little",
+    "nodes": {"PC": 1, "DSP": 2},
+    "header": [
+      {"name": "gonderen_id", "type": "uint8", "role": "src_addr"},
+      {"name": "alan_id",     "type": "uint8", "role": "dst_addr"},
+      {"name": "mesaj_id",    "type": "uint8", "role": "msg_id"},
+      {"name": "boy",         "type": "uint8", "role": "length"}
+    ]
+  },
+  "checksum": {"enabled": false},
+  "messages": {
+    "CitIstek": {
+      "id": 1, "name": "CIT Istek", "direction": "tx",
+      "src": "PC", "dst": "DSP",
+      "fields": []
+    },
+    "CitCevap": {
+      "id": 2, "name": "CIT Cevap", "direction": "rx",
+      "src": "DSP", "dst": "PC",
+      "fields": [{"name": "cit_verisi", "type": "bytes", "size": 4}]
+    }
+  }
+}
+```
+
+Working copy: [`configs/PcDsp/`](../configs/PcDsp/).
+
+---
+
 ## Rules for AI Generation
 
 When converting a struct definition to `protocol.json`:
 
 1. **Map struct fields to message fields** in the order they appear in the struct.
 2. **Choose the smallest type that fits** — if a field is 0-255 use `uint8`, not `uint16`.
-3. **Assign unique message IDs** — each message needs a unique integer 0-255.
+3. **Assign unique message IDs** — each message needs an integer that fits the `msg_id` header field (0-255 by default). IDs only have to be unique among messages sharing the same `src`/`dst` pair.
 4. **Define enums first** — any named constant set becomes an `enums` entry.
 5. **Use `bitfield` for packed flags** — multiple small values in one byte/word.
 6. **Use `constant` for fixed values** — if a field always carries the same value per direction (e.g. sender ID = 2 for TX, 1 for RX), use `"constant"` instead of making the user pass it every time.
 7. **Set `endianness`** — ask the user or default to `"little"` (most common).
 8. **Add checksum only if specified** — default to no checksum if not mentioned.
 9. **Use snake_case** for field names, **PascalCase** for message keys and enum names.
+10. **Describe an addressed header once, not per message** — if every frame starts with sender/receiver/length bytes, put them in `protocol.header` with their roles and give each message `src`/`dst`. Do **not** model them as `constant` payload fields: the parser can only validate and resync on fields it knows the role of.
 
 ### Type Mapping Heuristics
 
